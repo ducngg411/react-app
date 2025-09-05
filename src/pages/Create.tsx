@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Exercises from '../components/Exercises'
 import { saveLesson, setCurrentLesson, getCurrentLesson } from '../utils/storage'
 import { useToast } from '../components/Toast'
@@ -10,6 +10,47 @@ const STORAGE = {
   API: 'ai_grammar_api',
   MODEL: 'ai_grammar_model',
   LESSONS: 'ai_grammar_lessons',
+  GEMINI_API: 'ai_grammar_gemini_api',
+}
+
+async function findYouTubeVideo(lessonTitle: string){
+  try {
+    // Encode the lesson title for URL
+    const encodedTitle = encodeURIComponent(lessonTitle)
+    const apiUrl = `https://extractlinkfromai.onrender.com/search/${encodedTitle}`
+    
+    console.log('Searching YouTube for:', lessonTitle)
+    console.log('API URL:', apiUrl)
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    
+    if(!response.ok){
+      throw new Error(`YouTube search error: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    console.log('YouTube API response:', data)
+    
+    if(data.success && data.videos && data.videos.length > 0){
+      // Return the first video (most relevant)
+      const video = data.videos[0]
+      return {
+        videoId: video.video_id,
+        title: video.name,
+        channel: video.channel,
+        url: video.url,
+        viewCount: video.view_count_formatted
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.error('YouTube search error:', error)
+    return null
+  }
 }
 
 function buildPrompt(title: string){
@@ -44,15 +85,23 @@ Level: tự xác định dựa trên chủ đề (A1→C2)
 Học được gì từ bài này: viết rõ mục tiêu trong "objectives" bằng TIẾNG VIỆT.
 
 1. Kiến thức ngữ pháp: giải thích CỰC KỲ CHI TIẾT các quy tắc BẰNG TIẾNG VIỆT, bao gồm:
+   - Định nghĩa và ý nghĩa của cấu trúc ngữ pháp
    - Cấu trúc đầy đủ (khẳng định/phủ định/nghi vấn) - giải thích bằng tiếng Việt
+   - Các cách sử dụng khác nhau của cấu trúc này (ít nhất 3-5 cách sử dụng)
    - Dấu hiệu nhận biết (time markers, adverbs, expressions) - liệt kê và giải thích bằng tiếng Việt
    - Cách sử dụng trong các ngữ cảnh khác nhau (hội thoại, văn viết, formal/informal) - mô tả bằng tiếng Việt
    - Quy tắc đặc biệt và ngoại lệ - giải thích bằng tiếng Việt
    - Lỗi thường gặp và cách tránh - mô tả lỗi và cách sửa bằng tiếng Việt
    - So sánh với các cấu trúc tương tự - giải thích sự khác biệt bằng tiếng Việt
    - Mẹo ghi nhớ và thực hành - đưa ra lời khuyên bằng tiếng Việt
+   - Các trường hợp đặc biệt và nâng cao
+   
+   YÊU CẦU: Mỗi phần phải có ít nhất 5-10 điểm chi tiết, không được sơ sài. Phải bao gồm tất cả kiến thức có thể tìm thấy về chủ đề này.
 
-2. Ví dụ cụ thể: minh họa rõ cho từng phần kiến thức, có giải thích ngắn tiếng Việt.
+2. Ví dụ cụ thể: chia thành 2 nhóm:
+   - Nhóm 1: "Ví dụ cơ bản" - 3-5 ví dụ bám sát vào cấu trúc bài học, minh họa rõ từng quy tắc ngữ pháp đã học
+   - Nhóm 2: "Ví dụ IELTS Reading" - 2-3 ví dụ trích từ các bài đọc IELTS thực tế, có độ phức tạp cao hơn và ngữ cảnh học thuật
+   Mỗi ví dụ có giải thích ngắn tiếng Việt về cách áp dụng kiến thức đã học.
 
 3. Bài tập thực hành theo 5 mức độ tăng dần:
   - Level 1: Recognition (Chọn đáp án đúng) 5 câu, mỗi câu 3-4 lựa chọn.
@@ -64,59 +113,241 @@ Học được gì từ bài này: viết rõ mục tiêu trong "objectives" b�
 LƯU Ý: Tất cả hướng dẫn, giải thích, và mô tả phải bằng TIẾNG VIỆT. Chỉ có câu ví dụ và từ vựng mới dùng tiếng Anh.
 
 Ghi chú số lượng:
-- Grammar: 3-5 mục; mỗi mục 6-10 points, 3-5 patterns, 3-5 notes, 4-6 time_markers, 3-5 usage_contexts, 3-5 common_mistakes.
-- Ví dụ: 15-25 câu tổng; chia nhóm, có explain.
+- Grammar: 3-5 mục; mỗi mục phải có:
+  + points: 8-15 điểm chi tiết
+  + patterns: 5-8 cấu trúc
+  + notes: 5-10 ghi chú quan trọng
+  + time_markers: 6-10 dấu hiệu nhận biết
+  + usage_contexts: 5-8 ngữ cảnh sử dụng
+  + common_mistakes: 5-10 lỗi thường gặp
+- Ví dụ: chia thành 2 nhóm với tổng 8-12 câu:
+  + "Ví dụ cơ bản": 5-8 câu minh họa trực tiếp kiến thức đã học
+  + "Ví dụ IELTS Reading": 3-4 câu từ bài đọc IELTS thực tế
 CHỈ trả về JSON hợp lệ theo schema trên.`
 }
 
 async function callAI(prompt: string){
   const apiKey = localStorage.getItem(STORAGE.API)
-  const model = localStorage.getItem(STORAGE.MODEL) || 'gpt-4o-mini'
+  let model = localStorage.getItem(STORAGE.MODEL) || 'gpt-5'
   if(!apiKey) throw new Error('Thiếu API key. Mở Cài đặt để thêm.')
-  const resp = await fetch('https://api.openai.com/v1/chat/completions',{
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      messages:[
-        { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
-        { role:'user', content: prompt }
-      ],
-      temperature:0.4,
-      max_tokens: 4000
-    })
-  })
-  if(!resp.ok){
-    const t = await resp.text().catch(()=> '')
-    throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
+  
+  // Available models with fallback order
+  const availableModels = ['gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini']
+  
+  // If user selected gpt-5, try it first, then fallback
+  const modelsToTry = model === 'gpt-5' ? ['gpt-5', ...availableModels] : [model, ...availableModels.filter(m => m !== model)]
+  
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const currentModel = modelsToTry[i]
+    
+    try {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions',{
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: currentModel,
+          messages:[
+            { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
+            { role:'user', content: prompt }
+          ],
+          temperature:0.4,
+          max_tokens: 8000
+        })
+      })
+      
+      if(resp.ok){
+        const data = await resp.json()
+        return data.choices?.[0]?.message?.content || ''
+      } else {
+        const t = await resp.text().catch(()=> '')
+        let errorData = null
+        try {
+          errorData = t ? JSON.parse(t) : null
+        } catch {}
+        
+        // Handle rate limit errors
+        if(resp.status === 429 && errorData?.message?.includes('Rate limit reached')){
+          console.log(`Rate limit reached for ${currentModel}, trying next model...`)
+          if (i === modelsToTry.length - 1) {
+            throw new Error(`Rate limit đã đạt giới hạn cho tất cả model. Vui lòng thêm phương thức thanh toán tại https://platform.openai.com/account/billing hoặc thử lại sau.`)
+          }
+          continue // Try next model
+        }
+        
+        // Handle model not found errors (like gpt-5 not available)
+        if(resp.status === 404 || (errorData?.message?.includes('model') && errorData?.message?.includes('not found'))){
+          console.log(`Model ${currentModel} not found, trying next model...`)
+          if (i === modelsToTry.length - 1) {
+            throw new Error(`Không tìm thấy model nào khả dụng. Vui lòng kiểm tra lại cài đặt.`)
+          }
+          continue
+        }
+        
+        // For other errors, try next model if not the last one
+        if (i === modelsToTry.length - 1) {
+          throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
+        } else {
+          console.log(`Error with ${currentModel}, trying next model...`)
+          continue
+        }
+      }
+    } catch (error) {
+      console.log(`Exception with ${currentModel}:`, error)
+      if (i === modelsToTry.length - 1) {
+        throw error
+      }
+      // Continue to next fallback model
+    }
   }
-  const data = await resp.json()
-  return data.choices?.[0]?.message?.content || ''
+  
+  throw new Error('Không thể kết nối với bất kỳ model nào')
 }
 
 async function callAIOpts(prompt: string, opts?: { temperature?: number, max_tokens?: number }){
   const apiKey = localStorage.getItem(STORAGE.API)
-  const model = localStorage.getItem(STORAGE.MODEL) || 'gpt-4o-mini'
+  let model = localStorage.getItem(STORAGE.MODEL) || 'gpt-5'
   if(!apiKey) throw new Error('Thiếu API key. Mở Cài đặt để thêm.')
-  const resp = await fetch('https://api.openai.com/v1/chat/completions',{
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      messages:[
-        { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
-        { role:'user', content: prompt }
-      ],
-      temperature: opts?.temperature ?? 0.3,
-      max_tokens: opts?.max_tokens ?? 4000
-    })
-  })
-  if(!resp.ok){
-    const t = await resp.text().catch(()=> '')
-    throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
+  
+  // Available models with fallback order
+  const availableModels = ['gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini']
+  
+  // If user selected gpt-5, try it first, then fallback
+  const modelsToTry = model === 'gpt-5' ? ['gpt-5', ...availableModels] : [model, ...availableModels.filter(m => m !== model)]
+  
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const currentModel = modelsToTry[i]
+    
+    try {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions',{
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: currentModel,
+          messages:[
+            { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
+            { role:'user', content: prompt }
+          ],
+          temperature: opts?.temperature ?? 0.3,
+          max_tokens: opts?.max_tokens ?? 8000
+        })
+      })
+      
+      if(resp.ok){
+        const data = await resp.json()
+        return data.choices?.[0]?.message?.content || ''
+      } else {
+        const t = await resp.text().catch(()=> '')
+        let errorData = null
+        try {
+          errorData = t ? JSON.parse(t) : null
+        } catch {}
+        
+        // Handle rate limit errors
+        if(resp.status === 429 && errorData?.message?.includes('Rate limit reached')){
+          console.log(`Rate limit reached for ${currentModel}, trying next model...`)
+          if (i === modelsToTry.length - 1) {
+            throw new Error(`Rate limit đã đạt giới hạn cho tất cả model. Vui lòng thêm phương thức thanh toán tại https://platform.openai.com/account/billing hoặc thử lại sau.`)
+          }
+          continue // Try next model
+        }
+        
+        // Handle model not found errors (like gpt-5 not available)
+        if(resp.status === 404 || (errorData?.message?.includes('model') && errorData?.message?.includes('not found'))){
+          console.log(`Model ${currentModel} not found, trying next model...`)
+          if (i === modelsToTry.length - 1) {
+            throw new Error(`Không tìm thấy model nào khả dụng. Vui lòng kiểm tra lại cài đặt.`)
+          }
+          continue
+        }
+        
+        // For other errors, try next model if not the last one
+        if (i === modelsToTry.length - 1) {
+          throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
+        } else {
+          console.log(`Error with ${currentModel}, trying next model...`)
+          continue
+        }
+      }
+    } catch (error) {
+      console.log(`Exception with ${currentModel}:`, error)
+      if (i === modelsToTry.length - 1) {
+        throw error
+      }
+      // Continue to next fallback model
+    }
   }
-  const data = await resp.json()
-  return data.choices?.[0]?.message?.content || ''
+  
+  // If all OpenAI models fail, try Gemini as last resort
+  console.log('All OpenAI models failed, trying Gemini...')
+  try {
+    return await callGemini(prompt)
+  } catch (geminiError: any) {
+    throw new Error(`Tất cả AI services đều không khả dụng. OpenAI: Rate limit hoặc lỗi model. Gemini: ${geminiError.message}`)
+  }
+}
+
+// Global flag to track if Gemini was used
+let geminiUsed = false
+
+async function callSelectedAI(prompt: string, service: 'chatgpt' | 'gemini'){
+  if(service === 'gemini'){
+    geminiUsed = true
+    return await callGemini(prompt)
+  } else {
+    geminiUsed = false
+    return await callAI(prompt)
+  }
+}
+
+async function callGemini(prompt: string){
+  const apiKey = localStorage.getItem(STORAGE.GEMINI_API)
+  if(!apiKey) throw new Error('Thiếu Gemini API key. Mở Cài đặt để thêm.')
+  
+  geminiUsed = true // Mark that Gemini is being used
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Bạn là một giáo viên tiếng Anh chuyên nghiệp. 
+
+QUAN TRỌNG: 
+- Trả về CHỈ JSON hợp lệ
+- Không có markdown, không có giải thích thêm
+- Không escape quotes trong JSON strings (dùng " thay vì \")
+- Đảm bảo JSON hoàn chỉnh và đúng syntax
+- Tất cả strings phải được wrap trong double quotes
+
+${prompt}`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.3, // Lower temperature for more consistent JSON
+            maxOutputTokens: 8000,
+            thinkingConfig: {
+              thinkingBudget: 0 // Disable thinking for faster response
+            }
+          }
+        })
+    })
+    
+    if(!resp.ok){
+      const t = await resp.text().catch(()=> '')
+      throw new Error(`Gemini lỗi: ${resp.status} ${t}`)
+    }
+    
+    const data = await resp.json()
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    
+    // Debug: Log first 500 chars of response for troubleshooting
+    console.log('Gemini response preview:', responseText.slice(0, 500))
+    
+    return responseText
+  } catch (error: any) {
+    throw new Error(`Gemini không khả dụng: ${error.message}`)
+  }
 }
 
 function safeParseJSON(text: string){
@@ -175,6 +406,24 @@ function safeParseJSON(text: string){
     // Between string and null: " null -> ",null
     .replace(/"\s*null/g, '",null')
   
+  // Additional fixes for common Gemini JSON issues
+  cleaned = cleaned
+    // Fix escaped quotes in strings (Gemini often over-escapes)
+    .replace(/\\"/g, '"') // Replace \" with "
+    .replace(/\\\\/g, '\\') // Replace \\ with \
+    // Fix missing commas after array elements
+    .replace(/\]\s*\[/g, '],[')
+    .replace(/\]\s*"/g, '],"')
+    .replace(/\]\s*{/g, '],{')
+    .replace(/\]\s*\d/g, '],$1')
+    // Fix missing commas before array elements
+    .replace(/\[\s*"/g, '["')
+    .replace(/\[\s*{/g, '[{')
+    .replace(/\[\s*\d/g, '[$1')
+    // Fix malformed property names
+    .replace(/"([^"]*)\\\":/g, '"$1":') // Fix \"title\": -> "title":
+    .replace(/"([^"]*)\\\"/g, '"$1"') // Fix \"value\" -> "value"
+  
   // Find JSON boundaries
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
@@ -194,28 +443,39 @@ function safeParseJSON(text: string){
   }catch(e:any){
     console.error('safeParseJSON parse error:', e?.message)
     console.error('Problematic JSON snippet:', jsonString.slice(Math.max(0, e.message.match(/position (\d+)/)?.[1] - 50 || 0), Math.min(jsonString.length, (e.message.match(/position (\d+)/)?.[1] || 0) + 50)))
-    throw e
+    
+    // Try to fix common JSON issues
+    try {
+      const fixed = jsonString
+        .replace(/,\s*([}\]])/g, '$1') // Remove trailing commas
+        .replace(/\[\s*\]/g, '[]') // Fix empty arrays
+        .replace(/\{\s*\}/g, '{}') // Fix empty objects
+        .replace(/"\s*:\s*"/g, '":"') // Fix spacing around colons
+        .replace(/,\s*,/g, ',') // Remove double commas
+        .replace(/\\"/g, '"') // Fix over-escaped quotes
+        .replace(/\\\\/g, '\\') // Fix double backslashes
+        .replace(/"([^"]*)\\\":/g, '"$1":') // Fix malformed property names
+        .replace(/"([^"]*)\\\"/g, '"$1"') // Fix malformed string values
+        .replace(/:\s*"([^"]*)\\\"/g, ': "$1"') // Fix values with escaped quotes
+      
+      console.log('Attempting to fix JSON with additional corrections...')
+      return JSON.parse(fixed)
+    } catch (fixError: any) {
+      console.error('JSON fix failed:', fixError.message)
+      throw e // Throw original error if fix doesn't work
+    }
   }
 }
 
-async function fixInvalidJSON(text: string){
+async function fixInvalidJSON(text: string, service: 'chatgpt' | 'gemini' = 'chatgpt'){
   const prompt = `Hãy CHỈ trả về JSON hợp lệ được trích từ nội dung dưới đây. Không dùng markdown hay giải thích, không có \`\`\`. Đảm bảo JSON hoàn chỉnh và không có lỗi syntax.
 Nội dung:
 ${text}`
-  const raw = await callAI(prompt)
+  const raw = await callSelectedAI(prompt, service)
   // After AI fix, attempt strict parse
   return safeParseJSON(raw)
 }
 
-async function tryCompleteMissing(base:any){
-  const prompt = `Bổ sung/hoàn thiện JSON sau đây để ĐẦY ĐỦ theo đúng schema đã mô tả trước đó. Trả về CHỈ JSON hợp lệ.\nJSON hiện tại:\n${JSON.stringify(base)}`
-  const raw = await callAI(prompt)
-  try{
-    return safeParseJSON(raw)
-  }catch{
-    return fixInvalidJSON(raw)
-  }
-}
 
 export default function Create(){
   const [title, setTitle] = useState('')
@@ -227,6 +487,7 @@ export default function Create(){
   const [grading, setGrading] = useState(false)
   const [gradeResult, setGradeResult] = useState<{ok:boolean, feedback:string, corrections?:string} | null>(null)
   const [regenLoading, setRegenLoading] = useState(false)
+  const [aiService, setAiService] = useState<'chatgpt' | 'gemini'>('chatgpt')
   const toast = useToast()
 
   function updateProgress(v:number){
@@ -242,41 +503,55 @@ export default function Create(){
     return !!(obj.title && obj.level && Array.isArray(obj.objectives) && obj.objectives.length && hasGrammar && hasExamples && hasAnyExercise)
   }
 
-  async function tryCompleteMissing(base:any){
-    const prompt = `Bổ sung/hoàn thiện JSON sau đây để ĐẦY ĐỦ theo đúng schema đã mô tả trước đó. Trả về CHỈ JSON hợp lệ.\nJSON hiện tại:\n${JSON.stringify(base)}`
-    const raw = await callAI(prompt)
-    try{
-      return safeParseJSON(raw)
-    }catch{
-      return fixInvalidJSON(raw)
-    }
-  }
 
   async function generate(){
     if(!title.trim()) return
     setLoading(true)
     updateProgress(5)
     try{
+      // Xóa lesson cũ để tránh cache
+      setLesson(null)
+      
       const prompt = buildPrompt(title.trim())
       updateProgress(15)
-      const raw = await callAI(prompt)
+      
+      // Tìm kiếm video YouTube song song với AI generation
+      const videoPromise = findYouTubeVideo(title.trim())
+      
+      const raw = await callSelectedAI(prompt, aiService)
       updateProgress(65)
+      
+      // Lấy kết quả video
+      const video = await videoPromise
       let data: any
       try {
         data = safeParseJSON(raw)
       } catch (_e) {
         // try AI-based repair
-        data = await fixInvalidJSON(raw)
+        data = await fixInvalidJSON(raw, aiService)
       }
       updateProgress(80)
       if(!isCompleteLesson(data)){
         // fallback: ask AI to complete missing parts
-        const completed = await tryCompleteMissing(data)
-        if(isCompleteLesson(completed)){
-          data = completed
+        const prompt = `Bổ sung/hoàn thiện JSON sau đây để ĐẦY ĐỦ theo đúng schema đã mô tả trước đó. Trả về CHỈ JSON hợp lệ.\nJSON hiện tại:\n${JSON.stringify(data)}`
+        const raw = await callSelectedAI(prompt, aiService)
+        try{
+          const completed = safeParseJSON(raw)
+          if(isCompleteLesson(completed)){
+            data = completed
+          }
+        }catch{
+          const completed = await fixInvalidJSON(raw, aiService)
+          if(isCompleteLesson(completed)){
+            data = completed
+          }
         }
       }
-      const finalData = { ...data, createdAt: Date.now() }
+      
+      // Check if Gemini was used
+      const finalData = { ...data, createdAt: Date.now(), createdWithGemini: geminiUsed, video: video }
+      geminiUsed = false // Reset flag
+      console.log('🎯 Final lesson data:', finalData)
       setLesson(finalData)
       setCurrentLesson(finalData)
       setCurrentSection(1) // Reset to first section
@@ -354,25 +629,127 @@ Chỉ JSON, không markdown, không văn bản thừa.`
 
   const sections = [
     { id: 1, title: '1. Kiến thức ngữ pháp', content: (
-      <div className="grid md:grid-cols-2 gap-3">
+      <div className="p-4 rounded-xl border border-white/10 bg-slate-900">
+        {/* YouTube Video Section */}
+        {lesson?.video && (
+          <div className="mb-6 pb-6 border-b border-white/10">
+            <h4 className="font-semibold text-lg mb-3">📺 Video học ngữ pháp</h4>
+            <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+              <iframe
+                src={`https://www.youtube.com/embed/${lesson.video.videoId}`}
+                title={lesson.video.title}
+                className="absolute top-0 left-0 w-full h-full rounded-lg"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <div className="flex-1">
+                <h5 className="font-medium text-sm text-slate-300 mb-1">{lesson.video.title}</h5>
+                <div className="flex items-center gap-4 text-xs text-slate-500">
+                  <span>📺 {lesson.video.channel}</span>
+                  <span>👀 {lesson.video.viewCount} lượt xem</span>
+                </div>
+              </div>
+              <a 
+                href={lesson.video.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs rounded-lg flex items-center gap-2"
+              >
+                🔗 Xem trên YouTube
+              </a>
+            </div>
+          </div>
+        )}
+        
         {(lesson?.grammar||[]).map((g:any,i:number)=> (
-          <div key={i} className="p-3 rounded-xl border border-white/10 bg-slate-900">
-            <h4 className="font-semibold">{g.title}</h4>
-            <p className="text-slate-400 text-sm">{g.summary}</p>
-            {!!g.patterns?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Patterns:</div><ul className="list-disc ml-5">{g.patterns.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
-            {!!g.points?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Points:</div><ul className="list-disc ml-5">{g.points.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
-            {!!g.notes?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Notes:</div><ul className="list-disc ml-5">{g.notes.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
-            {!!g.time_markers?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Dấu hiệu nhận biết:</div><ul className="list-disc ml-5">{g.time_markers.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
-            {!!g.usage_contexts?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Cách sử dụng:</div><ul className="list-disc ml-5">{g.usage_contexts.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
-            {!!g.common_mistakes?.length && (<div className="mt-2 text-sm"><div className="text-slate-400">Lỗi thường gặp:</div><ul className="list-disc ml-5">{g.common_mistakes.map((p:string,j:number)=>(<li key={j}>{p}</li>))}</ul></div>)}
+          <div key={i} className={i > 0 ? "mt-6 pt-6 border-t border-white/10" : ""}>
+            <h4 className="font-semibold text-lg mb-3">{g.title}</h4>
+            <p className="text-slate-400 text-sm mb-4">{g.summary}</p>
+            
+            {/* Dynamic content rendering - display exactly as AI generated */}
+            <div className="space-y-4">
+              {g.points?.map((point:string, j:number) => (
+                <div key={j} className="text-sm text-slate-300 leading-relaxed">
+                  {point}
+                </div>
+              ))}
+            </div>
+            
+            {!!g.patterns?.length && (
+              <div className="mt-4">
+                <div className="text-slate-300 font-medium mb-2">Cấu trúc:</div>
+                <div className="space-y-2">
+                  {g.patterns.map((p:string,j:number)=>(
+                    <div key={j} className="text-sm font-mono bg-slate-800/50 px-3 py-2 rounded border border-white/5">
+                      {p}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {!!g.notes?.length && (
+              <div className="mt-4">
+                <div className="text-slate-300 font-medium mb-2">Ghi chú quan trọng:</div>
+                <div className="space-y-2">
+                  {g.notes.map((note:string,j:number)=>(
+                    <div key={j} className="text-sm text-slate-300 bg-yellow-600/10 border border-yellow-500/20 px-3 py-2 rounded">
+                      {note}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {!!g.time_markers?.length && (
+              <div className="mt-4">
+                <div className="text-slate-300 font-medium mb-2">Dấu hiệu nhận biết:</div>
+                <div className="flex flex-wrap gap-2">
+                  {g.time_markers.map((marker:string,j:number)=>(
+                    <span key={j} className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded-full border border-blue-500/30">
+                      {marker}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {!!g.usage_contexts?.length && (
+              <div className="mt-4">
+                <div className="text-slate-300 font-medium mb-2">Cách sử dụng:</div>
+                <div className="space-y-2">
+                  {g.usage_contexts.map((context:string,j:number)=>(
+                    <div key={j} className="text-sm text-slate-300 bg-green-600/10 border border-green-500/20 px-3 py-2 rounded">
+                      {context}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {!!g.common_mistakes?.length && (
+              <div className="mt-4">
+                <div className="text-slate-300 font-medium mb-2">Lỗi thường gặp:</div>
+                <div className="space-y-2">
+                  {g.common_mistakes.map((mistake:string,j:number)=>(
+                    <div key={j} className="text-sm text-red-300 bg-red-600/10 border border-red-500/20 px-3 py-2 rounded">
+                      {mistake}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
     )},
     { id: 2, title: '2. Ví dụ cụ thể', content: (
-      <div className="space-y-3">
-        <div className="p-3 rounded-xl border border-white/10 bg-slate-900">
-          <h4 className="font-semibold mb-2">Tự đặt câu & chấm tự động</h4>
+      <div className="p-4 rounded-xl border border-white/10 bg-slate-900">
+        <div className="mb-6 pb-6 border-b border-white/10">
+          <h4 className="font-semibold mb-3">Tự đặt câu & chấm tự động</h4>
           <input value={userSentence} onChange={e=> setUserSentence(e.target.value)} placeholder="Nhập câu tiếng Anh của bạn" className="w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
           <div className="mt-2 flex gap-2">
             <button disabled={!userSentence.trim() || grading} onClick={gradeUserSentence} className="px-3 py-1.5 rounded-lg bg-indigo-600 disabled:opacity-60">{grading? 'Đang chấm…':'Chấm câu'}</button>
@@ -385,56 +762,88 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
           )}
         </div>
-        <div className="grid md:grid-cols-2 gap-3">
-          {(lesson?.examples||[]).map((ex:any,i:number)=> (
-            <div key={i} className="p-3 rounded-xl border border-white/10 bg-slate-900">
-              <h4 className="font-semibold">{ex.title}</h4>
-              <div className="mt-2 space-y-1">
-                {(ex.items||[]).map((it:any,j:number)=> (
-                  <p key={j}><strong>{it.en}</strong><br/><span className="text-slate-400 text-sm">{it.vi}</span>{it.explain && (<><br/><span className="text-slate-500 text-xs">{it.explain}</span></>)}</p>
-                ))}
-              </div>
+        {(lesson?.examples||[]).map((ex:any,i:number)=> (
+          <div key={i} className={i > 0 ? "mt-6 pt-6 border-t border-white/10" : ""}>
+            <h4 className="font-semibold text-lg mb-3">{ex.title}</h4>
+            <div className="space-y-3">
+              {(ex.items||[]).map((it:any,j:number)=> (
+                <div key={j} className="p-3 rounded-lg border border-white/5 bg-slate-950">
+                  <p className="font-medium text-indigo-300">{it.en}</p>
+                  <p className="text-slate-400 text-sm mt-1">{it.vi}</p>
+                  {it.explain && <p className="text-slate-500 text-xs mt-2 italic">{it.explain}</p>}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     )},
     { id: 3, title: '3. Bài tập thực hành', content: <Exercises ex={lesson?.exercises} grammar={lesson?.grammar} onRegenerate={regenerateExercises} regenerating={regenLoading} /> }
   ]
 
   return (
-    <div className="grid md:grid-cols-[320px,1fr] gap-4">
-      <aside className="space-y-3">
-        <div className="p-3 rounded-xl border border-white/10 bg-slate-900">
-          <h3 className="font-semibold mb-2">Tạo bài học</h3>
-          <label className="text-xs text-slate-400">Tên bài học</label>
-          <input value={title} onChange={e=> setTitle(e.target.value)} placeholder="VD: Basic Sentence Structure" className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
-          <button onClick={generate} className="mt-3 w-full px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500">Tạo bằng AI</button>
-        </div>
-      </aside>
-      <main className="space-y-3">
-        {loading && (
-          <div className="p-3 rounded-xl border border-white/10 bg-slate-900">
-            <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
-              <span>Đang tạo bài học bằng AI…</span>
-              <span>{progress}%</span>
+    <div className="space-y-4">
+      {/* Header với form tạo bài học */}
+      <div className="p-4 rounded-xl border border-white/10 bg-slate-900">
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <h3 className="font-semibold mb-3">Tạo bài học mới</h3>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1 max-w-md">
+                <label className="text-xs text-slate-400">Tên bài học</label>
+                <input value={title} onChange={e=> setTitle(e.target.value)} placeholder="VD: Future Perfect, Present Perfect Continuous..." className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
+              </div>
+              <div className="min-w-[140px]">
+                <label className="text-xs text-slate-400">AI Service</label>
+                <select value={aiService} onChange={e=> setAiService(e.target.value as 'chatgpt' | 'gemini')} className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none">
+                  <option value="chatgpt">🤖 ChatGPT</option>
+                  <option value="gemini">✨ Gemini</option>
+                </select>
+              </div>
+              <button onClick={generate} disabled={loading} className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 whitespace-nowrap">
+                {loading ? 'Đang tạo...' : 'Tạo bằng AI'}
+              </button>
             </div>
-            <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden border border-white/10">
-              <div className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400" style={{width: `${progress}%`}} />
+          </div>
+        </div>
+      </div>
+
+      {/* Main content area */}
+      <main className="space-y-4">
+        {loading && (
+          <div className="p-6 rounded-xl border border-white/10 bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-400 mb-3">
+              <span className="font-medium">Đang tạo bài học bằng {aiService === 'gemini' ? '✨ Gemini' : '🤖 ChatGPT'}…</span>
+              <span className="bg-indigo-600/20 px-2 py-1 rounded">{progress}%</span>
+            </div>
+            <div className="h-3 w-full rounded-full bg-slate-800 overflow-hidden border border-white/10">
+              <div className={`h-full transition-all duration-300 ${aiService === 'gemini' ? 'bg-gradient-to-r from-purple-500 to-pink-400' : 'bg-gradient-to-r from-indigo-500 to-emerald-400'}`} style={{width: `${progress}%`}} />
             </div>
           </div>
         )}
         {!lesson && (<div className="text-slate-400 p-6 text-center border border-dashed border-white/10 rounded-xl">Nhập tên bài học và bấm "Tạo bằng AI".</div>)}
         {!!lesson && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="p-4 rounded-xl border border-white/10 bg-slate-900 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold">{lesson.title}</h2>
-                <p className="text-slate-400 text-sm">Level: {lesson.level}</p>
+                <div className="flex items-center gap-4 text-slate-400 text-sm">
+                  <span>Level: {lesson.level}</span>
+                  {lesson?.createdWithGemini ? (
+                    <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-300 text-xs">
+                      ✨ Powered by Gemini
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 rounded-full bg-indigo-600/20 text-indigo-300 text-xs">
+                      🤖 Powered by ChatGPT ({localStorage.getItem(STORAGE.MODEL) || 'gpt-5'})
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={()=> { saveLesson(lesson); toast.show('Đã lưu bài học') }} className="px-3 py-2 rounded-lg border border-white/10">Lưu bài học</button>
                 <button onClick={()=> navigator.clipboard.writeText(JSON.stringify(lesson,null,2))} className="px-3 py-2 rounded-lg border border-white/10">Sao chép JSON</button>
+                <button onClick={()=> { localStorage.removeItem(STORAGE.LESSONS); setLesson(null); toast.show('Đã xóa cache') }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400">Xóa cache</button>
               </div>
             </div>
             <section className="space-y-2">
@@ -445,7 +854,7 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </section>
             
             {/* Section Navigation */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-white/10">
               <div className="flex gap-2">
                 {sections.map(section => (
                   <button
@@ -472,9 +881,11 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
 
             {/* Current Section Content */}
-            <section className="space-y-2">
-              <h3 className="font-semibold">{sections.find(s => s.id === currentSection)?.title}</h3>
-              {sections.find(s => s.id === currentSection)?.content}
+            <section className="space-y-4">
+              <h3 className="font-semibold text-lg">{sections.find(s => s.id === currentSection)?.title}</h3>
+              <div className="min-h-[600px]">
+                {sections.find(s => s.id === currentSection)?.content}
+              </div>
             </section>
           </div>
         )}
