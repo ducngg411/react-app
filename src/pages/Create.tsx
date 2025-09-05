@@ -423,6 +423,13 @@ function safeParseJSON(text: string){
     // Fix malformed property names
     .replace(/"([^"]*)\\\":/g, '"$1":') // Fix \"title\": -> "title":
     .replace(/"([^"]*)\\\"/g, '"$1"') // Fix \"value\" -> "value"
+    // CRITICAL FIX: Remove trailing commas in property names and values
+    .replace(/"([^"]*),":/g, '"$1":') // Fix "id001,": -> "id001":
+    .replace(/"([^"]*),",/g, '"$1",') // Fix "id001,", -> "id001",
+    .replace(/"([^"]*),"\s*}/g, '"$1"}') // Fix "id001,"} -> "id001"}
+    .replace(/"([^"]*),"\s*]/g, '"$1"]') // Fix "id001,"] -> "id001"]
+    .replace(/"([^"]*),"\s*,/g, '"$1",') // Fix "id001,", -> "id001",
+    .replace(/"([^"]*),"\s*:/g, '"$1":') // Fix "id001,": -> "id001":
   
   // Find JSON boundaries
   const start = cleaned.indexOf('{')
@@ -457,12 +464,42 @@ function safeParseJSON(text: string){
         .replace(/"([^"]*)\\\":/g, '"$1":') // Fix malformed property names
         .replace(/"([^"]*)\\\"/g, '"$1"') // Fix malformed string values
         .replace(/:\s*"([^"]*)\\\"/g, ': "$1"') // Fix values with escaped quotes
+        // CRITICAL FIX: Remove trailing commas in property names and values
+        .replace(/"([^"]*),":/g, '"$1":') // Fix "id001,": -> "id001":
+        .replace(/"([^"]*),",/g, '"$1",') // Fix "id001,", -> "id001",
+        .replace(/"([^"]*),"\s*}/g, '"$1"}') // Fix "id001,"} -> "id001"}
+        .replace(/"([^"]*),"\s*]/g, '"$1"]') // Fix "id001,"] -> "id001"]
+        .replace(/"([^"]*),"\s*,/g, '"$1",') // Fix "id001,", -> "id001",
+        .replace(/"([^"]*),"\s*:/g, '"$1":') // Fix "id001,": -> "id001":
       
       console.log('Attempting to fix JSON with additional corrections...')
       return JSON.parse(fixed)
     } catch (fixError: any) {
       console.error('JSON fix failed:', fixError.message)
-      throw e // Throw original error if fix doesn't work
+      
+      // Last resort: try to extract and fix the specific problematic area
+      try {
+        const position = parseInt(fixError.message.match(/position (\d+)/)?.[1] || '0')
+        const context = jsonString.slice(Math.max(0, position - 100), Math.min(jsonString.length, position + 100))
+        console.error('Context around error:', context)
+        
+        // Try to fix the specific pattern causing the error
+        const lastResort = jsonString
+          .replace(/"([^"]*),":/g, '"$1":')
+          .replace(/"([^"]*),",/g, '"$1",')
+          .replace(/"([^"]*),"\s*}/g, '"$1"}')
+          .replace(/"([^"]*),"\s*]/g, '"$1"]')
+          .replace(/"([^"]*),"\s*,/g, '"$1",')
+          .replace(/"([^"]*),"\s*:/g, '"$1":')
+          .replace(/,\s*([}\]])/g, '$1')
+          .replace(/,\s*,/g, ',')
+        
+        console.log('Last resort fix attempt...')
+        return JSON.parse(lastResort)
+      } catch (lastError: any) {
+        console.error('All JSON fix attempts failed:', lastError.message)
+        throw e
+      }
     }
   }
 }
@@ -629,11 +666,11 @@ Chỉ JSON, không markdown, không văn bản thừa.`
 
   const sections = [
     { id: 1, title: '1. Kiến thức ngữ pháp', content: (
-      <div className="p-4 rounded-xl border border-white/10 bg-slate-900">
+      <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
         {/* YouTube Video Section */}
         {lesson?.video && (
-          <div className="mb-6 pb-6 border-b border-white/10">
-            <h4 className="font-semibold text-lg mb-3">📺 Video học ngữ pháp</h4>
+          <div className="mb-6 pb-6 border-b border-slate-200">
+            <h4 className="font-semibold text-lg mb-3 text-slate-800">📺 Video học ngữ pháp</h4>
             <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
               <iframe
                 src={`https://www.youtube.com/embed/${lesson.video.videoId}`}
@@ -646,8 +683,8 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
             <div className="mt-3 flex items-center justify-between">
               <div className="flex-1">
-                <h5 className="font-medium text-sm text-slate-300 mb-1">{lesson.video.title}</h5>
-                <div className="flex items-center gap-4 text-xs text-slate-500">
+                <h5 className="font-medium text-sm text-slate-800 mb-1">{lesson.video.title}</h5>
+                <div className="flex items-center gap-4 text-xs text-slate-600">
                   <span>📺 {lesson.video.channel}</span>
                   <span>👀 {lesson.video.viewCount} lượt xem</span>
                 </div>
@@ -665,14 +702,14 @@ Chỉ JSON, không markdown, không văn bản thừa.`
         )}
         
         {(lesson?.grammar||[]).map((g:any,i:number)=> (
-          <div key={i} className={i > 0 ? "mt-6 pt-6 border-t border-white/10" : ""}>
-            <h4 className="font-semibold text-lg mb-3">{g.title}</h4>
-            <p className="text-slate-400 text-sm mb-4">{g.summary}</p>
+          <div key={i} className={i > 0 ? "mt-6 pt-6 border-t border-slate-200" : ""}>
+            <h4 className="font-semibold text-lg mb-3 text-slate-800">{g.title}</h4>
+            <p className="text-slate-600 text-sm mb-4">{g.summary}</p>
             
             {/* Dynamic content rendering - display exactly as AI generated */}
             <div className="space-y-4">
               {g.points?.map((point:string, j:number) => (
-                <div key={j} className="text-sm text-slate-300 leading-relaxed">
+                <div key={j} className="text-sm text-slate-700 leading-relaxed">
                   {point}
                 </div>
               ))}
@@ -680,10 +717,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             
             {!!g.patterns?.length && (
               <div className="mt-4">
-                <div className="text-slate-300 font-medium mb-2">Cấu trúc:</div>
+                <div className="text-slate-700 font-medium mb-2">Cấu trúc:</div>
                 <div className="space-y-2">
                   {g.patterns.map((p:string,j:number)=>(
-                    <div key={j} className="text-sm font-mono bg-slate-800/50 px-3 py-2 rounded border border-white/5">
+                    <div key={j} className="text-sm font-mono bg-slate-50 px-3 py-2 rounded border border-slate-200 text-slate-800">
                       {p}
                     </div>
                   ))}
@@ -693,10 +730,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             
             {!!g.notes?.length && (
               <div className="mt-4">
-                <div className="text-slate-300 font-medium mb-2">Ghi chú quan trọng:</div>
+                <div className="text-slate-700 font-medium mb-2">Ghi chú quan trọng:</div>
                 <div className="space-y-2">
                   {g.notes.map((note:string,j:number)=>(
-                    <div key={j} className="text-sm text-slate-300 bg-yellow-600/10 border border-yellow-500/20 px-3 py-2 rounded">
+                    <div key={j} className="text-sm text-slate-700 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded">
                       {note}
                     </div>
                   ))}
@@ -706,10 +743,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             
             {!!g.time_markers?.length && (
               <div className="mt-4">
-                <div className="text-slate-300 font-medium mb-2">Dấu hiệu nhận biết:</div>
+                <div className="text-slate-700 font-medium mb-2">Dấu hiệu nhận biết:</div>
                 <div className="flex flex-wrap gap-2">
                   {g.time_markers.map((marker:string,j:number)=>(
-                    <span key={j} className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded-full border border-blue-500/30">
+                    <span key={j} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">
                       {marker}
                     </span>
                   ))}
@@ -719,10 +756,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             
             {!!g.usage_contexts?.length && (
               <div className="mt-4">
-                <div className="text-slate-300 font-medium mb-2">Cách sử dụng:</div>
+                <div className="text-slate-700 font-medium mb-2">Cách sử dụng:</div>
                 <div className="space-y-2">
                   {g.usage_contexts.map((context:string,j:number)=>(
-                    <div key={j} className="text-sm text-slate-300 bg-green-600/10 border border-green-500/20 px-3 py-2 rounded">
+                    <div key={j} className="text-sm text-slate-700 bg-green-50 border border-green-200 px-3 py-2 rounded">
                       {context}
                     </div>
                   ))}
@@ -732,10 +769,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             
             {!!g.common_mistakes?.length && (
               <div className="mt-4">
-                <div className="text-slate-300 font-medium mb-2">Lỗi thường gặp:</div>
+                <div className="text-slate-700 font-medium mb-2">Lỗi thường gặp:</div>
                 <div className="space-y-2">
                   {g.common_mistakes.map((mistake:string,j:number)=>(
-                    <div key={j} className="text-sm text-red-300 bg-red-600/10 border border-red-500/20 px-3 py-2 rounded">
+                    <div key={j} className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded">
                       {mistake}
                     </div>
                   ))}
@@ -784,23 +821,23 @@ Chỉ JSON, không markdown, không văn bản thừa.`
   return (
     <div className="space-y-4">
       {/* Header với form tạo bài học */}
-      <div className="p-4 rounded-xl border border-white/10 bg-slate-900">
+      <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex-1">
-            <h3 className="font-semibold mb-3">Tạo bài học mới</h3>
+            <h3 className="font-semibold mb-3 text-slate-800">Tạo bài học mới</h3>
             <div className="flex gap-4 items-end">
               <div className="flex-1 max-w-md">
-                <label className="text-xs text-slate-400">Tên bài học</label>
-                <input value={title} onChange={e=> setTitle(e.target.value)} placeholder="VD: Future Perfect, Present Perfect Continuous..." className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
+                <label className="text-xs text-slate-600">Tên bài học</label>
+                <input value={title} onChange={e=> setTitle(e.target.value)} placeholder="VD: Future Perfect, Present Perfect Continuous..." className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white outline-none text-slate-800" />
               </div>
               <div className="min-w-[140px]">
-                <label className="text-xs text-slate-400">AI Service</label>
-                <select value={aiService} onChange={e=> setAiService(e.target.value as 'chatgpt' | 'gemini')} className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none">
+                <label className="text-xs text-slate-600">AI Service</label>
+                <select value={aiService} onChange={e=> setAiService(e.target.value as 'chatgpt' | 'gemini')} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white outline-none text-slate-800">
                   <option value="chatgpt">🤖 ChatGPT</option>
                   <option value="gemini">✨ Gemini</option>
                 </select>
               </div>
-              <button onClick={generate} disabled={loading} className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 whitespace-nowrap">
+              <button onClick={generate} disabled={loading} style={{color: 'white'}} className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 whitespace-nowrap">
                 {loading ? 'Đang tạo...' : 'Tạo bằng AI'}
               </button>
             </div>
@@ -821,49 +858,49 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
           </div>
         )}
-        {!lesson && (<div className="text-slate-400 p-6 text-center border border-dashed border-white/10 rounded-xl">Nhập tên bài học và bấm "Tạo bằng AI".</div>)}
+        {!lesson && (<div className="text-slate-600 p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50">Nhập tên bài học và bấm "Tạo bằng AI".</div>)}
         {!!lesson && (
           <div className="space-y-6">
-            <div className="p-4 rounded-xl border border-white/10 bg-slate-900 flex items-center justify-between">
+            <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-semibold">{lesson.title}</h2>
-                <div className="flex items-center gap-4 text-slate-400 text-sm">
+                <h2 className="text-xl font-semibold text-slate-800">{lesson.title}</h2>
+                <div className="flex items-center gap-4 text-slate-600 text-sm">
                   <span>Level: {lesson.level}</span>
                   {lesson?.createdWithGemini ? (
-                    <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-300 text-xs">
+                    <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-600 text-xs border border-purple-500/30">
                       ✨ Powered by Gemini
                     </span>
                   ) : (
-                    <span className="px-2 py-1 rounded-full bg-indigo-600/20 text-indigo-300 text-xs">
+                    <span className="px-2 py-1 rounded-full bg-indigo-600/20 text-indigo-600 text-xs border border-indigo-500/30">
                       🤖 Powered by ChatGPT ({localStorage.getItem(STORAGE.MODEL) || 'gpt-5'})
                     </span>
                   )}
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={()=> { saveLesson(lesson); toast.show('Đã lưu bài học') }} className="px-3 py-2 rounded-lg border border-white/10">Lưu bài học</button>
-                <button onClick={()=> navigator.clipboard.writeText(JSON.stringify(lesson,null,2))} className="px-3 py-2 rounded-lg border border-white/10">Sao chép JSON</button>
-                <button onClick={()=> { localStorage.removeItem(STORAGE.LESSONS); setLesson(null); toast.show('Đã xóa cache') }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-400">Xóa cache</button>
+                <button onClick={()=> { saveLesson(lesson); toast.show('Đã lưu bài học') }} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200">Lưu bài học</button>
+                <button onClick={()=> navigator.clipboard.writeText(JSON.stringify(lesson,null,2))} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200">Sao chép JSON</button>
+                <button onClick={()=> { localStorage.removeItem(STORAGE.LESSONS); setLesson(null); toast.show('Đã xóa cache') }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200">Xóa cache</button>
               </div>
             </div>
             <section className="space-y-2">
               <h3 className="font-semibold">Mục tiêu</h3>
               <div className="flex flex-wrap gap-2">
-                {(lesson.objectives||[]).map((o: string,i:number)=>(<span key={i} className="px-2 py-1 rounded-full text-xs border border-white/10">{o}</span>))}
+                {(lesson.objectives||[]).map((o: string,i:number)=>(<span key={i} className="px-2 py-1 rounded-full text-xs border border-slate-200 bg-slate-50 text-slate-700">{o}</span>))}
               </div>
             </section>
             
             {/* Section Navigation */}
-            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-white/10">
+            <div className="flex items-center justify-between bg-slate-50/50 p-4 rounded-xl border border-slate-200 backdrop-blur-sm">
               <div className="flex gap-2">
                 {sections.map(section => (
                   <button
                     key={section.id}
                     onClick={() => setCurrentSection(section.id)}
-                    className={`px-3 py-2 rounded-lg border ${
+                    className={`px-3 py-2 rounded-lg border transition-all duration-200 ${
                       currentSection === section.id 
-                        ? 'bg-indigo-600 border-indigo-500' 
-                        : 'border-white/10 text-slate-400'
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' 
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800'
                     }`}
                   >
                     {section.title}
@@ -873,7 +910,7 @@ Chỉ JSON, không markdown, không văn bản thừa.`
               {currentSection < 3 && (
                 <button
                   onClick={() => setCurrentSection(currentSection + 1)}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all duration-200 shadow-sm"
                 >
                   Tiếp tục →
                 </button>
