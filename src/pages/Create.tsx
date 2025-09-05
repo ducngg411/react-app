@@ -24,7 +24,11 @@ async function findYouTubeVideo(lessonTitle: string){
     
     const response = await fetch(apiUrl, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      mode: 'cors' // Explicitly set CORS mode
     })
     
     if(!response.ok){
@@ -47,8 +51,15 @@ async function findYouTubeVideo(lessonTitle: string){
     }
     
     return null
-  } catch (error) {
+  } catch (error: any) {
     console.error('YouTube search error:', error)
+    
+    // Check if it's a CORS error
+    if(error.message?.includes('CORS') || error.message?.includes('Failed to fetch') || error.name === 'TypeError') {
+      console.warn('CORS error detected - YouTube search API is not accessible from this origin')
+      console.warn('This is normal when running locally. YouTube videos will be skipped.')
+    }
+    
     return null
   }
 }
@@ -519,6 +530,8 @@ export default function Create(){
   const [loading, setLoading] = useState(false)
   const [lesson, setLesson] = useState<Lesson | null>(null)
   const [progress, setProgress] = useState(0)
+  const [progressText, setProgressText] = useState('')
+  const [currentStep, setCurrentStep] = useState('')
   const [currentSection, setCurrentSection] = useState(1)
   const [userSentence, setUserSentence] = useState('')
   const [grading, setGrading] = useState(false)
@@ -527,8 +540,10 @@ export default function Create(){
   const [aiService, setAiService] = useState<'chatgpt' | 'gemini'>('chatgpt')
   const toast = useToast()
 
-  function updateProgress(v:number){
+  function updateProgress(v:number, step: string = '', text: string = ''){
     setProgress(Math.max(0, Math.min(100, v)))
+    setCurrentStep(step)
+    setProgressText(text)
   }
 
   function isCompleteLesson(obj:any){
@@ -544,31 +559,40 @@ export default function Create(){
   async function generate(){
     if(!title.trim()) return
     setLoading(true)
-    updateProgress(5)
+    updateProgress(5, 'Khởi tạo', 'Đang chuẩn bị tạo bài học...')
+    
     try{
       // Xóa lesson cũ để tránh cache
       setLesson(null)
       
       const prompt = buildPrompt(title.trim())
-      updateProgress(15)
+      updateProgress(10, 'Tìm kiếm video', 'Đang tìm video liên quan trên YouTube...')
       
       // Tìm kiếm video YouTube song song với AI generation
-      const videoPromise = findYouTubeVideo(title.trim())
+      const videoPromise = findYouTubeVideo(title.trim()).catch(error => {
+        console.warn('YouTube search failed, continuing without video:', error)
+        return null
+      })
       
+      updateProgress(20, 'Gọi AI', `Đang gọi ${aiService === 'gemini' ? 'Gemini' : 'ChatGPT'} để tạo nội dung...`)
       const raw = await callSelectedAI(prompt, aiService)
-      updateProgress(65)
+      updateProgress(60, 'Xử lý JSON', 'Đang phân tích và xử lý dữ liệu từ AI...')
       
       // Lấy kết quả video
       const video = await videoPromise
       let data: any
       try {
         data = safeParseJSON(raw)
+        updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
       } catch (_e) {
+        updateProgress(65, 'Sửa lỗi JSON', 'Đang sửa lỗi định dạng JSON...')
         // try AI-based repair
         data = await fixInvalidJSON(raw, aiService)
+        updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
       }
-      updateProgress(80)
+      
       if(!isCompleteLesson(data)){
+        updateProgress(75, 'Bổ sung nội dung', 'Đang bổ sung thêm nội dung cho bài học...')
         // fallback: ask AI to complete missing parts
         const prompt = `Bổ sung/hoàn thiện JSON sau đây để ĐẦY ĐỦ theo đúng schema đã mô tả trước đó. Trả về CHỈ JSON hợp lệ.\nJSON hiện tại:\n${JSON.stringify(data)}`
         const raw = await callSelectedAI(prompt, aiService)
@@ -585,6 +609,7 @@ export default function Create(){
         }
       }
       
+      updateProgress(90, 'Hoàn thiện', 'Đang hoàn thiện bài học...')
       // Check if Gemini was used
       const finalData = { ...data, createdAt: Date.now(), createdWithGemini: geminiUsed, video: video }
       geminiUsed = false // Reset flag
@@ -592,11 +617,14 @@ export default function Create(){
       setLesson(finalData)
       setCurrentLesson(finalData)
       setCurrentSection(1) // Reset to first section
-      updateProgress(100)
+      updateProgress(100, 'Hoàn thành', 'Bài học đã được tạo thành công!')
     }catch(e: any){
+      updateProgress(0, 'Lỗi', 'Có lỗi xảy ra khi tạo bài học')
       alert(e.message || 'Có lỗi khi gọi AI')
     }finally{ setLoading(false) }
-    setTimeout(()=> updateProgress(0), 600)
+    setTimeout(()=> {
+      updateProgress(0, '', '')
+    }, 2000)
   }
 
   async function gradeUserSentence(){
@@ -848,13 +876,29 @@ Chỉ JSON, không markdown, không văn bản thừa.`
       {/* Main content area */}
       <main className="space-y-4">
         {loading && (
-          <div className="p-6 rounded-xl border border-white/10 bg-slate-900">
-            <div className="flex items-center justify-between text-sm text-slate-400 mb-3">
-              <span className="font-medium">Đang tạo bài học bằng {aiService === 'gemini' ? '✨ Gemini' : '🤖 ChatGPT'}…</span>
-              <span className="bg-indigo-600/20 px-2 py-1 rounded">{progress}%</span>
+          <div className="p-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                  <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-slate-800">{currentStep || 'Đang xử lý...'}</h4>
+                  <p className="text-sm text-slate-600">{progressText || 'Vui lòng chờ trong giây lát...'}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-bold text-slate-800">{progress}%</div>
+                <div className="text-xs text-slate-500">Hoàn thành</div>
+              </div>
             </div>
-            <div className="h-3 w-full rounded-full bg-slate-800 overflow-hidden border border-white/10">
-              <div className={`h-full transition-all duration-300 ${aiService === 'gemini' ? 'bg-gradient-to-r from-purple-500 to-pink-400' : 'bg-gradient-to-r from-indigo-500 to-emerald-400'}`} style={{width: `${progress}%`}} />
+            <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+              <div className={`h-full transition-all duration-500 ease-out ${aiService === 'gemini' ? 'bg-gradient-to-r from-purple-500 to-pink-400' : 'bg-gradient-to-r from-indigo-500 to-emerald-400'}`} style={{width: `${progress}%`}} />
+            </div>
+            <div className="mt-2 text-xs text-slate-500 text-center">
+              Đang sử dụng {aiService === 'gemini' ? '✨ Gemini' : '🤖 ChatGPT'} để tạo bài học
+              <br />
+              <span className="text-slate-400">Lưu ý: Video YouTube có thể không khả dụng do CORS policy</span>
             </div>
           </div>
         )}
