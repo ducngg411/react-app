@@ -137,177 +137,14 @@ Ghi chú số lượng:
 CHỈ trả về JSON hợp lệ theo schema trên.`
 }
 
-async function callAI(prompt: string){
-  const apiKey = localStorage.getItem(STORAGE.API)
-  let model = localStorage.getItem(STORAGE.MODEL) || 'gpt-5'
-  if(!apiKey) throw new Error('Thiếu API key. Mở Cài đặt để thêm.')
-  
-  // Available models with fallback order
-  const availableModels = ['gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini']
-  
-  // If user selected gpt-5, try it first, then fallback
-  const modelsToTry = model === 'gpt-5' ? ['gpt-5', ...availableModels] : [model, ...availableModels.filter(m => m !== model)]
-  
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const currentModel = modelsToTry[i]
-    
-    try {
-      const resp = await fetch('https://api.openai.com/v1/chat/completions',{
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: currentModel,
-          messages:[
-            { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
-            { role:'user', content: prompt }
-          ],
-          temperature:0.4,
-          max_tokens: 8000
-        })
-      })
-      
-      if(resp.ok){
-        const data = await resp.json()
-        return data.choices?.[0]?.message?.content || ''
-      } else {
-        const t = await resp.text().catch(()=> '')
-        let errorData = null
-        try {
-          errorData = t ? JSON.parse(t) : null
-        } catch {}
-        
-        // Handle rate limit errors
-        if(resp.status === 429 && errorData?.message?.includes('Rate limit reached')){
-          console.log(`Rate limit reached for ${currentModel}, trying next model...`)
-          if (i === modelsToTry.length - 1) {
-            throw new Error(`Rate limit đã đạt giới hạn cho tất cả model. Vui lòng thêm phương thức thanh toán tại https://platform.openai.com/account/billing hoặc thử lại sau.`)
-          }
-          continue // Try next model
-        }
-        
-        // Handle model not found errors (like gpt-5 not available)
-        if(resp.status === 404 || (errorData?.message?.includes('model') && errorData?.message?.includes('not found'))){
-          console.log(`Model ${currentModel} not found, trying next model...`)
-          if (i === modelsToTry.length - 1) {
-            throw new Error(`Không tìm thấy model nào khả dụng. Vui lòng kiểm tra lại cài đặt.`)
-          }
-          continue
-        }
-        
-        // For other errors, try next model if not the last one
-        if (i === modelsToTry.length - 1) {
-          throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
-        } else {
-          console.log(`Error with ${currentModel}, trying next model...`)
-          continue
-        }
-      }
-    } catch (error) {
-      console.log(`Exception with ${currentModel}:`, error)
-      if (i === modelsToTry.length - 1) {
-        throw error
-      }
-      // Continue to next fallback model
-    }
-  }
-  
-  throw new Error('Không thể kết nối với bất kỳ model nào')
-}
 
-async function callAIOpts(prompt: string, opts?: { temperature?: number, max_tokens?: number }){
-  const apiKey = localStorage.getItem(STORAGE.API)
-  let model = localStorage.getItem(STORAGE.MODEL) || 'gpt-5'
-  if(!apiKey) throw new Error('Thiếu API key. Mở Cài đặt để thêm.')
-  
-  // Available models with fallback order
-  const availableModels = ['gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini']
-  
-  // If user selected gpt-5, try it first, then fallback
-  const modelsToTry = model === 'gpt-5' ? ['gpt-5', ...availableModels] : [model, ...availableModels.filter(m => m !== model)]
-  
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const currentModel = modelsToTry[i]
-    
-    try {
-      const resp = await fetch('https://api.openai.com/v1/chat/completions',{
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: currentModel,
-          messages:[
-            { role:'system', content:'You are an expert English grammar teacher who returns COMPLETE JSON ONLY, strictly matching the requested schema. Populate ALL fields with adequate detail (arrays with required number of items).' },
-            { role:'user', content: prompt }
-          ],
-          temperature: opts?.temperature ?? 0.3,
-          max_tokens: opts?.max_tokens ?? 8000
-        })
-      })
-      
-      if(resp.ok){
-        const data = await resp.json()
-        return data.choices?.[0]?.message?.content || ''
-      } else {
-        const t = await resp.text().catch(()=> '')
-        let errorData = null
-        try {
-          errorData = t ? JSON.parse(t) : null
-        } catch {}
-        
-        // Handle rate limit errors
-        if(resp.status === 429 && errorData?.message?.includes('Rate limit reached')){
-          console.log(`Rate limit reached for ${currentModel}, trying next model...`)
-          if (i === modelsToTry.length - 1) {
-            throw new Error(`Rate limit đã đạt giới hạn cho tất cả model. Vui lòng thêm phương thức thanh toán tại https://platform.openai.com/account/billing hoặc thử lại sau.`)
-          }
-          continue // Try next model
-        }
-        
-        // Handle model not found errors (like gpt-5 not available)
-        if(resp.status === 404 || (errorData?.message?.includes('model') && errorData?.message?.includes('not found'))){
-          console.log(`Model ${currentModel} not found, trying next model...`)
-          if (i === modelsToTry.length - 1) {
-            throw new Error(`Không tìm thấy model nào khả dụng. Vui lòng kiểm tra lại cài đặt.`)
-          }
-          continue
-        }
-        
-        // For other errors, try next model if not the last one
-        if (i === modelsToTry.length - 1) {
-          throw new Error(`OpenAI lỗi: ${resp.status} ${t}`)
-        } else {
-          console.log(`Error with ${currentModel}, trying next model...`)
-          continue
-        }
-      }
-    } catch (error) {
-      console.log(`Exception with ${currentModel}:`, error)
-      if (i === modelsToTry.length - 1) {
-        throw error
-      }
-      // Continue to next fallback model
-    }
-  }
-  
-  // If all OpenAI models fail, try Gemini as last resort
-  console.log('All OpenAI models failed, trying Gemini...')
-  try {
-    return await callGemini(prompt)
-  } catch (geminiError: any) {
-    throw new Error(`Tất cả AI services đều không khả dụng. OpenAI: Rate limit hoặc lỗi model. Gemini: ${geminiError.message}`)
-  }
-}
 
 // Global flag to track if Gemini was used
 let geminiUsed = false
 
-async function callSelectedAI(prompt: string, service: 'chatgpt' | 'gemini'){
-  if(service === 'gemini'){
-    geminiUsed = true
-    return await callGemini(prompt)
-  } else {
-    geminiUsed = false
-    return await callAI(prompt)
-  }
+async function callSelectedAI(prompt: string){
+  geminiUsed = true
+  return await callGemini(prompt)
 }
 
 async function callGemini(prompt: string){
@@ -515,11 +352,11 @@ function safeParseJSON(text: string){
   }
 }
 
-async function fixInvalidJSON(text: string, service: 'chatgpt' | 'gemini' = 'chatgpt'){
+async function fixInvalidJSON(text: string){
   const prompt = `Hãy CHỈ trả về JSON hợp lệ được trích từ nội dung dưới đây. Không dùng markdown hay giải thích, không có \`\`\`. Đảm bảo JSON hoàn chỉnh và không có lỗi syntax.
 Nội dung:
 ${text}`
-  const raw = await callSelectedAI(prompt, service)
+  const raw = await callGemini(prompt)
   // After AI fix, attempt strict parse
   return safeParseJSON(raw)
 }
@@ -537,7 +374,6 @@ export default function Create(){
   const [grading, setGrading] = useState(false)
   const [gradeResult, setGradeResult] = useState<{ok:boolean, feedback:string, corrections?:string} | null>(null)
   const [regenLoading, setRegenLoading] = useState(false)
-  const [aiService, setAiService] = useState<'chatgpt' | 'gemini'>('chatgpt')
   const toast = useToast()
 
   function updateProgress(v:number, step: string = '', text: string = ''){
@@ -574,8 +410,8 @@ export default function Create(){
         return null
       })
       
-      updateProgress(20, 'Gọi AI', `Đang gọi ${aiService === 'gemini' ? 'Gemini' : 'ChatGPT'} để tạo nội dung...`)
-      const raw = await callSelectedAI(prompt, aiService)
+      updateProgress(20, 'Gọi AI', 'Đang gọi Gemini để tạo nội dung...')
+      const raw = await callSelectedAI(prompt)
       updateProgress(60, 'Xử lý JSON', 'Đang phân tích và xử lý dữ liệu từ AI...')
       
       // Lấy kết quả video
@@ -587,7 +423,7 @@ export default function Create(){
       } catch (_e) {
         updateProgress(65, 'Sửa lỗi JSON', 'Đang sửa lỗi định dạng JSON...')
         // try AI-based repair
-        data = await fixInvalidJSON(raw, aiService)
+        data = await fixInvalidJSON(raw)
         updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
       }
       
@@ -595,14 +431,14 @@ export default function Create(){
         updateProgress(75, 'Bổ sung nội dung', 'Đang bổ sung thêm nội dung cho bài học...')
         // fallback: ask AI to complete missing parts
         const prompt = `Bổ sung/hoàn thiện JSON sau đây để ĐẦY ĐỦ theo đúng schema đã mô tả trước đó. Trả về CHỈ JSON hợp lệ.\nJSON hiện tại:\n${JSON.stringify(data)}`
-        const raw = await callSelectedAI(prompt, aiService)
+        const raw = await callSelectedAI(prompt)
         try{
           const completed = safeParseJSON(raw)
           if(isCompleteLesson(completed)){
             data = completed
           }
         }catch{
-          const completed = await fixInvalidJSON(raw, aiService)
+          const completed = await fixInvalidJSON(raw)
           if(isCompleteLesson(completed)){
             data = completed
           }
@@ -611,7 +447,7 @@ export default function Create(){
       
       updateProgress(90, 'Hoàn thiện', 'Đang hoàn thiện bài học...')
       // Check if Gemini was used
-      const finalData = { ...data, createdAt: Date.now(), createdWithGemini: geminiUsed, video: video }
+      const finalData = { ...data, createdAt: Date.now(), createdWithGemini: true, video: video }
       geminiUsed = false // Reset flag
       console.log('🎯 Final lesson data:', finalData)
       setLesson(finalData)
@@ -635,7 +471,7 @@ export default function Create(){
       const prompt = `Bạn là giáo viên ngữ pháp. Hãy chấm câu do học viên tự viết dựa trên bài học sau. Trả về CHỈ JSON: {"ok": boolean, "feedback": string, "corrections": string}.
 Bài học (tóm tắt grammar): ${JSON.stringify(lesson.grammar||[])}
 Câu của học viên: ${userSentence}`
-      const raw = await callAI(prompt)
+      const raw = await callGemini(prompt)
       const res = safeParseJSON(raw)
       setGradeResult({ ok: !!res.ok, feedback: String(res.feedback||''), corrections: res.corrections||'' })
     }catch(e:any){
@@ -659,7 +495,7 @@ Số lượng bắt buộc: recognition(5), gap_fill(5), transformation(5), erro
 Chủ đề: ${lesson.title}
 Grammar (tóm tắt): ${JSON.stringify((lesson.grammar||[]).map((g:any)=>({title:g.title, patterns:g.patterns?.slice(0,3)||[], points:g.points?.slice(0,5)||[]})))}
 Chỉ JSON, không markdown, không văn bản thừa.`
-      const raw = await callAIOpts(prompt, { max_tokens: 3500 })
+      const raw = await callGemini(prompt)
       let parsed: any
       try {
         parsed = safeParseJSON(raw)
@@ -858,13 +694,6 @@ Chỉ JSON, không markdown, không văn bản thừa.`
                 <label className="text-xs text-slate-600">Tên bài học</label>
                 <input value={title} onChange={e=> setTitle(e.target.value)} placeholder="VD: Future Perfect, Present Perfect Continuous..." className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white outline-none text-slate-800" />
               </div>
-              <div className="min-w-[140px]">
-                <label className="text-xs text-slate-600">AI Service</label>
-                <select value={aiService} onChange={e=> setAiService(e.target.value as 'chatgpt' | 'gemini')} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white outline-none text-slate-800">
-                  <option value="chatgpt">🤖 ChatGPT</option>
-                  <option value="gemini">✨ Gemini</option>
-                </select>
-              </div>
               <button onClick={generate} disabled={loading} style={{color: 'white'}} className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 whitespace-nowrap">
                 {loading ? 'Đang tạo...' : 'Tạo bằng AI'}
               </button>
@@ -893,10 +722,10 @@ Chỉ JSON, không markdown, không văn bản thừa.`
               </div>
             </div>
             <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200">
-              <div className={`h-full transition-all duration-500 ease-out ${aiService === 'gemini' ? 'bg-gradient-to-r from-purple-500 to-pink-400' : 'bg-gradient-to-r from-indigo-500 to-emerald-400'}`} style={{width: `${progress}%`}} />
+              <div className="h-full transition-all duration-500 ease-out bg-gradient-to-r from-purple-500 to-pink-400" style={{width: `${progress}%`}} />
             </div>
             <div className="mt-2 text-xs text-slate-500 text-center">
-              Đang sử dụng {aiService === 'gemini' ? '✨ Gemini' : '🤖 ChatGPT'} để tạo bài học
+              Đang sử dụng ✨ Gemini để tạo bài học
               <br />
               <span className="text-slate-400">Lưu ý: Video YouTube có thể không khả dụng do CORS policy</span>
             </div>
@@ -910,15 +739,9 @@ Chỉ JSON, không markdown, không văn bản thừa.`
                 <h2 className="text-xl font-semibold text-slate-800">{lesson.title}</h2>
                 <div className="flex items-center gap-4 text-slate-600 text-sm">
                   <span>Level: {lesson.level}</span>
-                  {lesson?.createdWithGemini ? (
-                    <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-600 text-xs border border-purple-500/30">
-                      ✨ Powered by Gemini
-                    </span>
-                  ) : (
-                    <span className="px-2 py-1 rounded-full bg-indigo-600/20 text-indigo-600 text-xs border border-indigo-500/30">
-                      🤖 Powered by ChatGPT ({localStorage.getItem(STORAGE.MODEL) || 'gpt-5'})
-                    </span>
-                  )}
+                  <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-600 text-xs border border-purple-500/30">
+                    ✨ Powered by Gemini
+                  </span>
                 </div>
               </div>
               <div className="flex gap-2">
