@@ -3,35 +3,29 @@ import { useEffect, useState } from 'react'
 const STORAGE = {
   API: 'ai_grammar_api',
   MODEL: 'ai_grammar_model',
-  GEMINI_API: 'ai_grammar_gemini_api',
 }
 
 export default function SettingsModal({ open, onClose }:{ open:boolean, onClose:()=>void }){
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('gpt-5')
-  const [geminiApiKey, setGeminiApiKey] = useState('')
 
   useEffect(()=>{
     if(open){
       setApiKey(localStorage.getItem(STORAGE.API) || '')
       setModel(localStorage.getItem(STORAGE.MODEL) || 'gpt-5')
-      setGeminiApiKey(localStorage.getItem(STORAGE.GEMINI_API) || '')
     }
   },[open])
 
   function save(){
     localStorage.setItem(STORAGE.API, apiKey.trim())
     localStorage.setItem(STORAGE.MODEL, model)
-    localStorage.setItem(STORAGE.GEMINI_API, geminiApiKey.trim())
     onClose()
   }
   function clear(){
     localStorage.removeItem(STORAGE.API)
     localStorage.removeItem(STORAGE.MODEL)
-    localStorage.removeItem(STORAGE.GEMINI_API)
     setApiKey('')
     setModel('gpt-5')
-    setGeminiApiKey('')
   }
 
   if(!open) return null
@@ -49,10 +43,10 @@ export default function SettingsModal({ open, onClose }:{ open:boolean, onClose:
             <input value={apiKey} onChange={e=> setApiKey(e.target.value)} type="password" placeholder="sk-..." className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
           </div>
           
-          <div>
-            <label className="text-xs text-slate-400">Gemini API Key</label>
-            <input value={geminiApiKey} onChange={e=> setGeminiApiKey(e.target.value)} type="password" placeholder="AIza..." className="mt-1 w-full px-3 py-2 rounded-lg border border-white/10 bg-slate-950 outline-none" />
-            <p className="text-xs text-slate-500 mt-1">Lấy từ <a href="https://makersuite.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">Google AI Studio</a></p>
+          <div className="p-3 rounded-lg bg-green-600/20 border border-green-500/30">
+            <p className="text-xs text-green-300 font-medium">✅ Gemini API Key</p>
+            <p className="text-xs text-green-200 mt-1">Đã được cấu hình trong file .env. Tất cả user sẽ dùng chung API key này.</p>
+            <p className="text-xs text-green-200 mt-1">API Key: {(import.meta as any).env?.VITE_GEMINI_API_KEY ? '***' + (import.meta as any).env.VITE_GEMINI_API_KEY.slice(-4) : 'Chưa cấu hình'}</p>
           </div>
           
           <div>

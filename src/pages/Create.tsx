@@ -1,17 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import Exercises from '../components/Exercises'
-import { saveLesson, setCurrentLesson, getCurrentLesson } from '../utils/storage'
 import { useToast } from '../components/Toast'
-
+import { useAuth } from '../contexts/AuthContext'
+import apiService from '../services/api'
 
 type Lesson = any
-
-const STORAGE = {
-  API: 'ai_grammar_api',
-  MODEL: 'ai_grammar_model',
-  LESSONS: 'ai_grammar_lessons',
-  GEMINI_API: 'ai_grammar_gemini_api',
-}
 
 async function findYouTubeVideo(lessonTitle: string){
   try {
@@ -67,7 +61,12 @@ async function findYouTubeVideo(lessonTitle: string){
 function buildPrompt(title: string){
   return `Bạn sẽ đóng vai trò là một trợ lý giáo viên tiếng Anh, chuyên tạo ra các bài học chi tiết và hấp dẫn. Nhiệm vụ của bạn là tạo một bài học ngữ pháp dựa trên chủ đề tôi cung cấp, với cấu trúc cụ thể sau và TRẢ VỀ CHỈ JSON hợp lệ theo schema (không giải thích ngoài JSON):
 
-QUAN TRỌNG: Tất cả nội dung giải thích lý thuyết, mục tiêu, và hướng dẫn phải được viết bằng TIẾNG VIỆT để người học Việt Nam dễ hiểu. Chỉ có các ví dụ câu tiếng Anh và thuật ngữ ngữ pháp cần thiết mới dùng tiếng Anh.
+QUAN TRỌNG: 
+- Tất cả nội dung giải thích lý thuyết, mục tiêu, và hướng dẫn phải được viết bằng TIẾNG VIỆT để người học Việt Nam dễ hiểu. Chỉ có các ví dụ câu tiếng Anh và thuật ngữ ngữ pháp cần thiết mới dùng tiếng Anh.
+- TRÁNH sử dụng dấu ngoặc kép (") trong nội dung text để tránh lỗi JSON
+- TRÁNH sử dụng dấu phẩy (,) trong nội dung text để tránh lỗi JSON
+- Thay thế các ký tự đặc biệt bằng từ ngữ thông thường
+- Đảm bảo JSON hoàn chỉnh và đúng cú pháp
 
 {
   "title": string,
@@ -140,18 +139,19 @@ CHỈ trả về JSON hợp lệ theo schema trên.`
 
 
 // Global flag to track if Gemini was used
-let geminiUsed = false
+// let geminiUsed = false
 
 async function callSelectedAI(prompt: string){
-  geminiUsed = true
   return await callGemini(prompt)
 }
 
 async function callGemini(prompt: string){
-  const apiKey = localStorage.getItem(STORAGE.GEMINI_API)
-  if(!apiKey) throw new Error('Thiếu Gemini API key. Mở Cài đặt để thêm.')
+  // API key từ environment variables - tất cả user sẽ dùng chung
+  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY
   
-  geminiUsed = true // Mark that Gemini is being used
+  if(!apiKey) throw new Error('Thiếu Gemini API key trong environment variables. Vui lòng kiểm tra file .env')
+  
+  // Mark that Gemini is being used
   try {
     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -167,6 +167,10 @@ QUAN TRỌNG:
 - Không escape quotes trong JSON strings (dùng " thay vì \")
 - Đảm bảo JSON hoàn chỉnh và đúng syntax
 - Tất cả strings phải được wrap trong double quotes
+- TRÁNH sử dụng dấu ngoặc kép (") trong nội dung text
+- TRÁNH sử dụng dấu phẩy (,) trong nội dung text
+- Thay thế các ký tự đặc biệt bằng từ ngữ thông thường
+- Đảm bảo tất cả arrays và objects được đóng đúng cách
 
 ${prompt}`
             }]
@@ -198,108 +202,134 @@ ${prompt}`
   }
 }
 
+// Advanced JSON sanitizer to handle problematic characters in content
+function sanitizeJSONContent(text: string): string {
+  // First, extract and protect JSON structure
+  const jsonStart = text.indexOf('{')
+  const jsonEnd = text.lastIndexOf('}')
+  
+  if (jsonStart === -1 || jsonEnd === -1) {
+    return text
+  }
+  
+  const beforeJSON = text.slice(0, jsonStart)
+  const jsonContent = text.slice(jsonStart, jsonEnd + 1)
+  const afterJSON = text.slice(jsonEnd + 1)
+  
+  // Process JSON content to fix common issues
+  let processed = jsonContent
+  
+  // Step 1: Fix unescaped quotes in string values
+  // This regex finds string values and ensures quotes inside are properly escaped
+  processed = processed.replace(/"([^"]*)"([^"]*)"([^"]*)":/g, (match, p1, p2, p3) => {
+    // If we have quotes in the middle, escape them
+    if (p2.includes('"')) {
+      const escaped = p2.replace(/"/g, '\\"')
+      return `"${p1}${escaped}${p3}":`
+    }
+    return match
+  })
+  
+  // Step 2: Fix string values that contain quotes
+  processed = processed.replace(/:\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+    if (p2.includes('"')) {
+      const escaped = p2.replace(/"/g, '\\"')
+      return `: "${p1}${escaped}${p3}"`
+    }
+    return match
+  })
+  
+  // Step 3: Fix commas inside string values that break JSON
+  processed = processed.replace(/:\s*"([^"]*),([^"]*)"/g, ': "$1\\,$2"')
+  
+  // Step 4: Fix brackets inside string values
+  processed = processed.replace(/:\s*"([^"]*)\[([^"]*)"/g, ': "$1\\[$2"')
+  processed = processed.replace(/:\s*"([^"]*)\]([^"]*)"/g, ': "$1\\]$2"')
+  
+  // Step 5: Fix braces inside string values
+  processed = processed.replace(/:\s*"([^"]*)\{([^"]*)"/g, ': "$1\\{$2"')
+  processed = processed.replace(/:\s*"([^"]*)\}([^"]*)"/g, ': "$1\\}$2"')
+  
+  return beforeJSON + processed + afterJSON
+}
+
 function safeParseJSON(text: string){
-  // Strip code fences and extract JSON content
+  console.log('🔧 Starting JSON parsing...')
+  
+  // Step 1: Clean and sanitize the text
   let cleaned = text
     .replace(/^[\uFEFF\s]+/, '') // Remove BOM/leading whitespace
     .replace(/```json|```/gi, '')
     .replace(/^[\s\S]*?(\{)/, '$1') // Get content from first {
     .replace(/(\})[^\}]*$/, '$1')   // Get content to last }
   
-  // Remove trailing commas before closing brackets/braces
-  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1')
+  // Step 2: Sanitize problematic content
+  cleaned = sanitizeJSONContent(cleaned)
   
-  // Fix missing commas between various JSON elements
+  // Step 3: Fix structural JSON issues
   cleaned = cleaned
-    // Between objects: }{ -> },{
+    // Remove trailing commas before closing brackets/braces
+    .replace(/,\s*([}\]])/g, '$1')
+    // Fix missing commas between elements
     .replace(/}\s*{/g, '},{')
-    // Between arrays: ][ -> ],[
     .replace(/]\s*\[/g, '],[')
-    // Between array and object: ]{ -> ],{
     .replace(/]\s*{/g, '],{')
-    // Between object and array: }[ -> },[
     .replace(/}\s*\[/g, '},[')
-    // Between strings: " " -> ","
     .replace(/"\s*"/g, '","')
-    // Between string and object: " { -> ",{
     .replace(/"\s*{/g, '",{')
-    // Between object and string: } " -> },"
     .replace(/}\s*"/g, '},"')
-    // Between string and array: " [ -> ",[
     .replace(/"\s*\[/g, '",[')
-    // Between array and string: ] " -> ],"
     .replace(/]\s*"/g, '],"')
-    // Between number and object: 123 { -> 123,{
     .replace(/(\d)\s*{/g, '$1,{')
-    // Between object and number: } 123 -> },123
     .replace(/}\s*(\d)/g, '},$1')
-    // Between number and string: 123 " -> 123,"
     .replace(/(\d)\s*"/g, '$1,"')
-    // Between string and number: " 123 -> ",123
     .replace(/"\s*(\d)/g, '",$1')
-    // Between boolean and object: true { -> true,{
     .replace(/(true|false)\s*{/g, '$1,{')
-    // Between object and boolean: } true -> },true
     .replace(/}\s*(true|false)/g, '},$1')
-    // Between boolean and string: true " -> true,"
     .replace(/(true|false)\s*"/g, '$1,"')
-    // Between string and boolean: " true -> ",true
     .replace(/"\s*(true|false)/g, '",$1')
-    // Between null and object: null { -> null,{
     .replace(/null\s*{/g, 'null,{')
-    // Between object and null: } null -> },null
     .replace(/}\s*null/g, '},null')
-    // Between null and string: null " -> null,"
     .replace(/null\s*"/g, 'null,"')
-    // Between string and null: " null -> ",null
     .replace(/"\s*null/g, '",null')
   
-  // Additional fixes for common Gemini JSON issues
+  // Step 4: Additional Gemini-specific fixes
   cleaned = cleaned
-    // Fix escaped quotes in strings (Gemini often over-escapes)
-    .replace(/\\"/g, '"') // Replace \" with "
-    .replace(/\\\\/g, '\\') // Replace \\ with \
-    // Fix missing commas after array elements
-    .replace(/\]\s*\[/g, '],[')
-    .replace(/\]\s*"/g, '],"')
-    .replace(/\]\s*{/g, '],{')
-    .replace(/\]\s*\d/g, '],$1')
-    // Fix missing commas before array elements
-    .replace(/\[\s*"/g, '["')
-    .replace(/\[\s*{/g, '[{')
-    .replace(/\[\s*\d/g, '[$1')
+    // Fix over-escaped quotes
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
     // Fix malformed property names
-    .replace(/"([^"]*)\\\":/g, '"$1":') // Fix \"title\": -> "title":
-    .replace(/"([^"]*)\\\"/g, '"$1"') // Fix \"value\" -> "value"
-    // CRITICAL FIX: Remove trailing commas in property names and values
-    .replace(/"([^"]*),":/g, '"$1":') // Fix "id001,": -> "id001":
-    .replace(/"([^"]*),",/g, '"$1",') // Fix "id001,", -> "id001",
-    .replace(/"([^"]*),"\s*}/g, '"$1"}') // Fix "id001,"} -> "id001"}
-    .replace(/"([^"]*),"\s*]/g, '"$1"]') // Fix "id001,"] -> "id001"]
-    .replace(/"([^"]*),"\s*,/g, '"$1",') // Fix "id001,", -> "id001",
-    .replace(/"([^"]*),"\s*:/g, '"$1":') // Fix "id001,": -> "id001":
+    .replace(/"([^"]*)\\\":/g, '"$1":')
+    .replace(/"([^"]*)\\\"/g, '"$1"')
+    // Remove trailing commas in property names
+    .replace(/"([^"]*),":/g, '"$1":')
+    .replace(/"([^"]*),",/g, '"$1",')
+    .replace(/"([^"]*),"\s*}/g, '"$1"}')
+    .replace(/"([^"]*),"\s*]/g, '"$1"]')
+    .replace(/"([^"]*),"\s*,/g, '"$1",')
+    .replace(/"([^"]*),"\s*:/g, '"$1":')
   
-  // Find JSON boundaries
+  // Step 5: Find JSON boundaries
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
   
   if(start === -1 || end === -1){
-    console.error('safeParseJSON: cannot find JSON object bounds', { 
-      snippet: text.slice(0, 200),
-      cleanedSnippet: cleaned.slice(0, 200)
-    })
+    console.error('❌ Cannot find JSON object bounds')
     throw new Error('Invalid JSON structure: Missing { or }')
   }
   
   const jsonString = cleaned.slice(start, end + 1)
+  console.log('🔍 JSON string length:', jsonString.length)
   
-  try{
-    return JSON.parse(jsonString)
-  }catch(e:any){
-    console.error('safeParseJSON parse error:', e?.message)
-    console.error('Problematic JSON snippet:', jsonString.slice(Math.max(0, e.message.match(/position (\d+)/)?.[1] - 50 || 0), Math.min(jsonString.length, (e.message.match(/position (\d+)/)?.[1] || 0) + 50)))
+  // Step 6: Try parsing with multiple strategies
+  try {
+    const result = JSON.parse(jsonString)
+    console.log('✅ JSON parsed successfully')
+    return result
+  } catch (e: any) {
+    console.error('❌ Initial parse failed:', e.message)
     
-    // Try to fix common JSON issues
+    // Strategy 1: Fix common structural issues
     try {
       const fixed = jsonString
         .replace(/,\s*([}\]])/g, '$1') // Remove trailing commas
@@ -309,47 +339,135 @@ function safeParseJSON(text: string){
         .replace(/,\s*,/g, ',') // Remove double commas
         .replace(/\\"/g, '"') // Fix over-escaped quotes
         .replace(/\\\\/g, '\\') // Fix double backslashes
-        .replace(/"([^"]*)\\\":/g, '"$1":') // Fix malformed property names
-        .replace(/"([^"]*)\\\"/g, '"$1"') // Fix malformed string values
-        .replace(/:\s*"([^"]*)\\\"/g, ': "$1"') // Fix values with escaped quotes
-        // CRITICAL FIX: Remove trailing commas in property names and values
-        .replace(/"([^"]*),":/g, '"$1":') // Fix "id001,": -> "id001":
-        .replace(/"([^"]*),",/g, '"$1",') // Fix "id001,", -> "id001",
-        .replace(/"([^"]*),"\s*}/g, '"$1"}') // Fix "id001,"} -> "id001"}
-        .replace(/"([^"]*),"\s*]/g, '"$1"]') // Fix "id001,"] -> "id001"]
-        .replace(/"([^"]*),"\s*,/g, '"$1",') // Fix "id001,", -> "id001",
-        .replace(/"([^"]*),"\s*:/g, '"$1":') // Fix "id001,": -> "id001":
+        .replace(/"([^"]*),":/g, '"$1":') // Fix property names with commas
+        .replace(/"([^"]*),",/g, '"$1",')
+        .replace(/"([^"]*),"\s*}/g, '"$1"}')
+        .replace(/"([^"]*),"\s*]/g, '"$1"]')
+        .replace(/"([^"]*),"\s*,/g, '"$1",')
+        .replace(/"([^"]*),"\s*:/g, '"$1":')
       
-      console.log('Attempting to fix JSON with additional corrections...')
+      console.log('🔧 Trying structural fixes...')
       return JSON.parse(fixed)
     } catch (fixError: any) {
-      console.error('JSON fix failed:', fixError.message)
+      console.error('❌ Structural fixes failed:', fixError.message)
       
-      // Last resort: try to extract and fix the specific problematic area
+      // Strategy 2: Extract and reconstruct valid parts
       try {
-        const position = parseInt(fixError.message.match(/position (\d+)/)?.[1] || '0')
-        const context = jsonString.slice(Math.max(0, position - 100), Math.min(jsonString.length, position + 100))
-        console.error('Context around error:', context)
-        
-        // Try to fix the specific pattern causing the error
-        const lastResort = jsonString
-          .replace(/"([^"]*),":/g, '"$1":')
-          .replace(/"([^"]*),",/g, '"$1",')
-          .replace(/"([^"]*),"\s*}/g, '"$1"}')
-          .replace(/"([^"]*),"\s*]/g, '"$1"]')
-          .replace(/"([^"]*),"\s*,/g, '"$1",')
-          .replace(/"([^"]*),"\s*:/g, '"$1":')
-          .replace(/,\s*([}\]])/g, '$1')
-          .replace(/,\s*,/g, ',')
-        
-        console.log('Last resort fix attempt...')
-        return JSON.parse(lastResort)
-      } catch (lastError: any) {
-        console.error('All JSON fix attempts failed:', lastError.message)
-        throw e
+        const reconstructed = reconstructJSONFromFragments(jsonString)
+        console.log('🔧 Trying reconstruction...')
+        return reconstructed
+      } catch (reconstructError: any) {
+        console.error('❌ Reconstruction failed:', reconstructError.message)
+        throw e // Throw original error
       }
     }
   }
+}
+
+// Helper function to reconstruct JSON from fragments
+function reconstructJSONFromFragments(jsonString: string): any {
+  console.log('🔧 Reconstructing JSON from fragments...')
+  
+  // Extract basic fields
+  const titleMatch = jsonString.match(/"title":\s*"([^"]+)"/)
+  const levelMatch = jsonString.match(/"level":\s*"([^"]+)"/)
+  
+  if (!titleMatch || !levelMatch) {
+    throw new Error('Cannot extract basic fields')
+  }
+  
+  // Create minimal valid structure
+  const reconstructed: any = {
+    title: titleMatch[1],
+    level: levelMatch[1],
+    objectives: [],
+    prerequisites: [],
+    grammar: [],
+    examples: [],
+    exercises: {
+      recognition: [],
+      gap_fill: [],
+      transformation: [],
+      error_correction: [],
+      free_production: []
+    }
+  }
+  
+  // Try to extract objectives
+  try {
+    const objectivesMatch = jsonString.match(/"objectives":\s*\[(.*?)\]/s)
+    if (objectivesMatch) {
+      const objectivesStr = objectivesMatch[1]
+      // Extract individual quoted strings
+      const objectiveMatches = objectivesStr.match(/"([^"]+)"/g)
+      if (objectiveMatches) {
+        reconstructed.objectives = objectiveMatches.map(m => m.slice(1, -1))
+      }
+    }
+  } catch (e) {
+    console.warn('Could not extract objectives')
+  }
+  
+  // Try to extract grammar sections
+  try {
+    const grammarMatch = jsonString.match(/"grammar":\s*\[(.*?)\]/s)
+    if (grammarMatch) {
+      const grammarStr = grammarMatch[1]
+      // Find individual grammar objects
+      const grammarObjects = grammarStr.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g)
+      if (grammarObjects) {
+        reconstructed.grammar = grammarObjects.map(objStr => {
+          try {
+            return JSON.parse(objStr)
+          } catch (e) {
+            // Create minimal grammar object
+            const titleMatch = objStr.match(/"title":\s*"([^"]+)"/)
+            return {
+              title: titleMatch ? titleMatch[1] : 'Grammar Point',
+              summary: 'Grammar explanation',
+              points: ['Point 1', 'Point 2'],
+              patterns: ['Pattern 1'],
+              notes: ['Note 1'],
+              time_markers: [],
+              usage_contexts: [],
+              common_mistakes: []
+            }
+          }
+        })
+      }
+    }
+  } catch (e) {
+    console.warn('Could not extract grammar')
+  }
+  
+  // Try to extract examples
+  try {
+    const examplesMatch = jsonString.match(/"examples":\s*\[(.*?)\]/s)
+    if (examplesMatch) {
+      const examplesStr = examplesMatch[1]
+      const exampleObjects = examplesStr.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g)
+      if (exampleObjects) {
+        reconstructed.examples = exampleObjects.map(objStr => {
+          try {
+            return JSON.parse(objStr)
+          } catch (e) {
+            const titleMatch = objStr.match(/"title":\s*"([^"]+)"/)
+            return {
+              title: titleMatch ? titleMatch[1] : 'Example',
+              items: [
+                { en: 'Example sentence', vi: 'Ví dụ', explain: 'Explanation' }
+              ]
+            }
+          }
+        })
+      }
+    }
+  } catch (e) {
+    console.warn('Could not extract examples')
+  }
+  
+  console.log('✅ JSON reconstructed successfully')
+  return reconstructed
 }
 
 async function fixInvalidJSON(text: string){
@@ -374,7 +492,94 @@ export default function Create(){
   const [grading, setGrading] = useState(false)
   const [gradeResult, setGradeResult] = useState<{ok:boolean, feedback:string, corrections?:string} | null>(null)
   const [regenLoading, setRegenLoading] = useState(false)
+  const [loadingLesson, setLoadingLesson] = useState(false)
+  const [isSavedLesson, setIsSavedLesson] = useState(false)
   const toast = useToast()
+  const { isAuthenticated } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  // Authentication guard
+  useEffect(() => {
+    if (!isAuthenticated) {
+      toast.show('Vui lòng đăng nhập để sử dụng tính năng này')
+      navigate('/library')
+    }
+  }, [isAuthenticated, navigate, toast])
+
+  // Load lesson from router state when component mounts (only if authenticated)
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    if (location.state?.lesson) {
+      console.log('📖 Loading lesson from router state:', location.state.lesson)
+      console.log('📖 Lesson title:', location.state.lesson.title)
+      console.log('📖 Lesson level:', location.state.lesson.level)
+      console.log('📖 Lesson objectives:', location.state.lesson.objectives)
+      setLesson(location.state.lesson)
+      setCurrentSection(1)
+      setIsSavedLesson(true) // Lesson từ router state là lesson đã lưu
+    } else {
+      // Check if there's a lesson ID in URL params
+      const urlParams = new URLSearchParams(location.search)
+      const lessonId = urlParams.get('lessonId')
+      
+      if (lessonId) {
+        console.log('📖 Loading lesson from database:', lessonId)
+        loadLessonFromDatabase(lessonId)
+      }
+    }
+  }, [location.state, location.search, isAuthenticated])
+
+  // Don't render anything if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-600">Đang chuyển hướng đến trang đăng nhập...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Function to load lesson from database
+  const loadLessonFromDatabase = async (lessonId: string) => {
+    try {
+      setLoadingLesson(true)
+      const response = await apiService.getLesson(lessonId)
+      if (response.success) {
+        console.log('📚 Loaded lesson from database:', response.data.lesson)
+        setLesson(response.data.lesson)
+        setCurrentSection(1)
+        setIsSavedLesson(true) // Lesson từ database là lesson đã lưu
+        // Clear URL params after successful load
+        navigate('/', { replace: true })
+      } else {
+        console.error('❌ Failed to load lesson:', response.message)
+        toast.show('Không thể tải bài học: ' + response.message)
+      }
+    } catch (error) {
+      console.error('❌ Error loading lesson:', error)
+      toast.show('Có lỗi khi tải bài học')
+    } finally {
+      setLoadingLesson(false)
+    }
+  }
+
+  // Debug logging for lesson state
+  useEffect(() => {
+    if (lesson) {
+      console.log('📚 Current lesson state:', {
+        title: lesson.title,
+        level: lesson.level,
+        hasObjectives: Array.isArray(lesson.objectives) && lesson.objectives.length > 0,
+        hasGrammar: Array.isArray(lesson.grammar) && lesson.grammar.length > 0,
+        hasExamples: Array.isArray(lesson.examples) && lesson.examples.length > 0,
+        hasExercises: !!lesson.exercises
+      })
+    }
+  }, [lesson])
 
   function updateProgress(v:number, step: string = '', text: string = ''){
     setProgress(Math.max(0, Math.min(100, v)))
@@ -400,6 +605,7 @@ export default function Create(){
     try{
       // Xóa lesson cũ để tránh cache
       setLesson(null)
+      setIsSavedLesson(false) // Reset khi tạo lesson mới
       
       const prompt = buildPrompt(title.trim())
       updateProgress(10, 'Tìm kiếm video', 'Đang tìm video liên quan trên YouTube...')
@@ -417,15 +623,72 @@ export default function Create(){
       // Lấy kết quả video
       const video = await videoPromise
       let data: any
-      try {
-        data = safeParseJSON(raw)
-        updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
-      } catch (_e) {
-        updateProgress(65, 'Sửa lỗi JSON', 'Đang sửa lỗi định dạng JSON...')
-        // try AI-based repair
-        data = await fixInvalidJSON(raw)
-        updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
+      
+      // Try multiple parsing strategies
+      let parseAttempts = 0
+      const maxAttempts = 3
+      
+      while (parseAttempts < maxAttempts) {
+        try {
+          if (parseAttempts === 0) {
+            data = safeParseJSON(raw)
+          } else {
+            // Try AI-based repair for subsequent attempts
+            updateProgress(65 + parseAttempts * 5, 'Sửa lỗi JSON', `Đang sửa lỗi định dạng JSON (lần ${parseAttempts + 1})...`)
+            data = await fixInvalidJSON(raw)
+          }
+          
+          if (isCompleteLesson(data)) {
+            console.log(`✅ JSON parsed successfully on attempt ${parseAttempts + 1}`)
+            break
+          } else {
+            console.log(`⚠️ Incomplete lesson on attempt ${parseAttempts + 1}, trying again...`)
+            parseAttempts++
+          }
+        } catch (error: any) {
+          console.error(`❌ Parse attempt ${parseAttempts + 1} failed:`, error.message)
+          parseAttempts++
+          
+          if (parseAttempts >= maxAttempts) {
+            // Final fallback: create a minimal lesson structure
+            console.log('🔧 Creating fallback lesson structure...')
+            data = {
+              title: title.trim(),
+              level: 'B1/Pre-Intermediate',
+              objectives: [`Học về ${title.trim()}`],
+              prerequisites: [],
+              grammar: [{
+                title: title.trim(),
+                summary: `Giải thích về ${title.trim()}`,
+                points: [`Đây là điểm quan trọng về ${title.trim()}`],
+                patterns: [`Cấu trúc cơ bản của ${title.trim()}`],
+                notes: [`Ghi chú về ${title.trim()}`],
+                time_markers: [],
+                usage_contexts: [`Cách sử dụng ${title.trim()}`],
+                common_mistakes: [`Lỗi thường gặp với ${title.trim()}`]
+              }],
+              examples: [{
+                title: 'Ví dụ cơ bản',
+                items: [{
+                  en: 'Example sentence',
+                  vi: 'Ví dụ câu',
+                  explain: 'Giải thích'
+                }]
+              }],
+              exercises: {
+                recognition: [],
+                gap_fill: [],
+                transformation: [],
+                error_correction: [],
+                free_production: []
+              }
+            }
+            break
+          }
+        }
       }
+      
+      updateProgress(70, 'Kiểm tra dữ liệu', 'Đang kiểm tra tính đầy đủ của bài học...')
       
       if(!isCompleteLesson(data)){
         updateProgress(75, 'Bổ sung nội dung', 'Đang bổ sung thêm nội dung cho bài học...')
@@ -448,10 +711,8 @@ export default function Create(){
       updateProgress(90, 'Hoàn thiện', 'Đang hoàn thiện bài học...')
       // Check if Gemini was used
       const finalData = { ...data, createdAt: Date.now(), createdWithGemini: true, video: video }
-      geminiUsed = false // Reset flag
       console.log('🎯 Final lesson data:', finalData)
       setLesson(finalData)
-      setCurrentLesson(finalData)
       setCurrentSection(1) // Reset to first section
       updateProgress(100, 'Hoàn thành', 'Bài học đã được tạo thành công!')
     }catch(e: any){
@@ -469,7 +730,7 @@ export default function Create(){
     setGradeResult(null)
     try{
       const prompt = `Bạn là giáo viên ngữ pháp. Hãy chấm câu do học viên tự viết dựa trên bài học sau. Trả về CHỈ JSON: {"ok": boolean, "feedback": string, "corrections": string}.
-Bài học (tóm tắt grammar): ${JSON.stringify(lesson.grammar||[])}
+Bài học (tóm tắt grammar): ${JSON.stringify(lesson?.grammar||[])}
 Câu của học viên: ${userSentence}`
       const raw = await callGemini(prompt)
       const res = safeParseJSON(raw)
@@ -492,8 +753,8 @@ Câu của học viên: ${userSentence}`
   "free_production": [{"id": string, "task": string, "sample": string}]
 }
 Số lượng bắt buộc: recognition(5), gap_fill(5), transformation(5), error_correction(5), free_production(2-3).
-Chủ đề: ${lesson.title}
-Grammar (tóm tắt): ${JSON.stringify((lesson.grammar||[]).map((g:any)=>({title:g.title, patterns:g.patterns?.slice(0,3)||[], points:g.points?.slice(0,5)||[]})))}
+Chủ đề: ${lesson?.title}
+Grammar (tóm tắt): ${JSON.stringify((lesson?.grammar||[]).map((g:any)=>({title:g.title, patterns:g.patterns?.slice(0,3)||[], points:g.points?.slice(0,5)||[]})))}
 Chỉ JSON, không markdown, không văn bản thừa.`
       const raw = await callGemini(prompt)
       let parsed: any
@@ -514,7 +775,6 @@ Chỉ JSON, không markdown, không văn bản thừa.`
       }
       const updated = { ...lesson, exercises: normalized }
       setLesson(updated)
-      setCurrentLesson(updated)
       toast.show('Đã đổi bộ câu hỏi')
     }catch(e:any){
       const msg = e?.message || 'Không đổi được bộ câu hỏi'
@@ -523,10 +783,27 @@ Chỉ JSON, không markdown, không văn bản thừa.`
     }finally{ setRegenLoading(false) }
   }
 
-  useEffect(()=>{
-    const cur = getCurrentLesson()
-    if(cur){ setLesson(cur) }
-  },[])
+  // Save lesson to database
+  const saveLessonToDB = async (lessonData: Lesson) => {
+    if (!isAuthenticated) {
+      toast.show('Vui lòng đăng nhập để lưu bài học')
+      return
+    }
+
+    try {
+      const response = await apiService.createLesson(lessonData)
+      if (response.success) {
+        toast.show('Đã lưu bài học vào database')
+        setIsSavedLesson(true) // Mark as saved after successful save
+        return response.data.lesson
+      } else {
+        toast.show('Lưu bài học thất bại: ' + response.message)
+      }
+    } catch (error) {
+      toast.show('Có lỗi khi lưu bài học')
+      console.error('Save lesson error:', error)
+    }
+  }
 
   const sections = [
     { id: 1, title: '1. Kiến thức ngữ pháp', content: (
@@ -537,8 +814,8 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             <h4 className="font-semibold text-lg mb-3 text-slate-800">📺 Video học ngữ pháp</h4>
             <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
               <iframe
-                src={`https://www.youtube.com/embed/${lesson.video.videoId}`}
-                title={lesson.video.title}
+                src={`https://www.youtube.com/embed/${lesson?.video?.videoId}`}
+                title={lesson?.video?.title}
                 className="absolute top-0 left-0 w-full h-full rounded-lg"
                 frameBorder="0"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -547,14 +824,14 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
             <div className="mt-3 flex items-center justify-between">
               <div className="flex-1">
-                <h5 className="font-medium text-sm text-slate-800 mb-1">{lesson.video.title}</h5>
+                <h5 className="font-medium text-sm text-slate-800 mb-1">{lesson?.video?.title}</h5>
                 <div className="flex items-center gap-4 text-xs text-slate-600">
-                  <span>📺 {lesson.video.channel}</span>
-                  <span>👀 {lesson.video.viewCount} lượt xem</span>
+                  <span>📺 {lesson?.video?.channel}</span>
+                  <span>👀 {lesson?.video?.viewCount} lượt xem</span>
                 </div>
               </div>
               <a 
-                href={lesson.video.url} 
+                href={lesson?.video?.url} 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="ml-4 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs rounded-lg flex items-center gap-2"
@@ -731,29 +1008,51 @@ Chỉ JSON, không markdown, không văn bản thừa.`
             </div>
           </div>
         )}
-        {!lesson && (<div className="text-slate-600 p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50">Nhập tên bài học và bấm "Tạo bằng AI".</div>)}
+        {loadingLesson && (
+          <div className="text-center py-12">
+            <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-slate-600">Đang tải bài học...</p>
+          </div>
+        )}
+        {!lesson && !loadingLesson && (
+          <div className="text-slate-600 p-6 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50">
+            <div className="mb-4">
+              <svg className="w-16 h-16 mx-auto text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Chưa có bài học nào</h3>
+            <p className="text-slate-500">Nhập tên bài học và bấm "Tạo bằng AI" để bắt đầu.</p>
+          </div>
+        )}
         {!!lesson && (
           <div className="space-y-6">
             <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-slate-800">{lesson.title}</h2>
+                <h2 className="text-xl font-semibold text-slate-800">{lesson?.title}</h2>
                 <div className="flex items-center gap-4 text-slate-600 text-sm">
-                  <span>Level: {lesson.level}</span>
+                  <span>Level: {lesson?.level}</span>
                   <span className="px-2 py-1 rounded-full bg-purple-600/20 text-purple-600 text-xs border border-purple-500/30">
                     ✨ Powered by Gemini
                   </span>
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={()=> { saveLesson(lesson); toast.show('Đã lưu bài học') }} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200">Lưu bài học</button>
-                <button onClick={()=> navigator.clipboard.writeText(JSON.stringify(lesson,null,2))} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200">Sao chép JSON</button>
-                <button onClick={()=> { localStorage.removeItem(STORAGE.LESSONS); setLesson(null); toast.show('Đã xóa cache') }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200">Xóa cache</button>
+                {!isSavedLesson && (
+                  <button onClick={()=> saveLessonToDB(lesson)} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200">Lưu bài học</button>
+                )}
+                {isSavedLesson && (
+                  <span className="px-3 py-2 rounded-lg border border-green-200 bg-green-50 text-green-700 text-sm">
+                    ✅ Đã lưu trong database
+                  </span>
+                )}
+                <button onClick={()=> { setLesson(null); setIsSavedLesson(false); toast.show('Đã xóa bài học hiện tại') }} className="px-3 py-2 rounded-lg border border-red-500/20 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200">Xóa bài học</button>
               </div>
             </div>
             <section className="space-y-2">
               <h3 className="font-semibold">Mục tiêu</h3>
               <div className="flex flex-wrap gap-2">
-                {(lesson.objectives||[]).map((o: string,i:number)=>(<span key={i} className="px-2 py-1 rounded-full text-xs border border-slate-200 bg-slate-50 text-slate-700">{o}</span>))}
+                {(lesson?.objectives||[]).map((o: string,i:number)=>(<span key={i} className="px-2 py-1 rounded-full text-xs border border-slate-200 bg-slate-50 text-slate-700">{o}</span>))}
               </div>
             </section>
             
